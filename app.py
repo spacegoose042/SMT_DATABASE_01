@@ -607,7 +607,7 @@ def import_csv():
 
 if __name__ == '__main__':
     # Initialize database on startup (only if AUTO_INIT_DB is set)
-    logger.info("Starting SMT Production Schedule Database application")
+    logger.info("Starting SMT Production Schedule Database application v2.0")
     
     auto_init = os.getenv('AUTO_INIT_DB', 'false').lower() == 'true'
     if auto_init:
