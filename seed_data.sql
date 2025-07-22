@@ -3,7 +3,8 @@
 
 -- Insert default schedule configuration
 INSERT INTO schedule_config (hours_per_day, days_per_week, efficiency_factor) 
-VALUES (8, 5, 2.0);
+VALUES (8, 5, 2.0)
+ON CONFLICT DO NOTHING;
 
 -- Insert production lines based on CSV data and SMT_LINE_PROPERTIES.md
 INSERT INTO production_lines (
@@ -30,12 +31,14 @@ INSERT INTO production_lines (
 ('4-EURO 586 (4) MCI', 'EURO 586', 'Main Floor', 4, 1.0, 1, 8, 5, 60, '12:00:00', 'Standard', 'idle', true),
 
 -- Hand placement line (Line 5) - only used when manually specified
-('Hand Placement', 'Hand', 'Main Floor', 1, 1.0, 1, 8, 5, 60, '12:00:00', 'Specialized', 'idle', true);
+('Hand Placement', 'Hand', 'Main Floor', 1, 1.0, 1, 8, 5, 60, '12:00:00', 'Specialized', 'idle', true)
+ON CONFLICT (line_name) DO NOTHING;
 
 -- Insert default admin user (password should be changed after first login)
 -- Note: This is a placeholder - in production, use proper password hashing
 INSERT INTO users (username, email, password_hash, role, active) 
-VALUES ('admin', 'admin@smt.com', 'placeholder_hash_change_me', 'admin', true);
+VALUES ('admin', 'admin@smt.com', 'placeholder_hash_change_me', 'admin', true)
+ON CONFLICT (username) DO NOTHING;
 
 -- Insert sample customers from CSV data
 INSERT INTO customers (name, active) VALUES
@@ -58,7 +61,8 @@ INSERT INTO customers (name, active) VALUES
 ('Ushio', true),
 ('Accessible Tech', true),
 ('Braun', true),
-('Bladewerx', true);
+('Bladewerx', true)
+ON CONFLICT (name) DO NOTHING;
 
 -- Insert sample assemblies from CSV data
 INSERT INTO assemblies (customer_id, assembly_number, revision, description) 
@@ -113,16 +117,17 @@ FROM (
     ('Accessible Tech', 'ATI001_PCBA', '.2', 'Accessible Tech Assembly ATI001_PCBA'),
     ('Braun', '35214A', 'NA', 'Braun Assembly 35214A'),
     ('MCI', '9017414-1', 'F', 'MCI Assembly 9017414-1'),
-    ('MCI', '9018575-2', 'D', 'MCI Assembly 9018575-2 (Duplicate)'),
     ('Subsite', '861-36075', 'V02', 'Subsite Assembly 861-36075'),
     ('Subsite', '216-1323', '03', 'Subsite Assembly 216-1323')
 ) AS assembly_data(customer_name, assembly_number, revision, description)
 JOIN customers c ON c.name = assembly_data.customer_name
-WHERE c.active = true;
+WHERE c.active = true
+ON CONFLICT (customer_id, assembly_number, revision) DO NOTHING;
 
 -- Initialize trolley management (assuming 20 trolleys available)
 INSERT INTO trolley_management (trolley_number, current_status)
-SELECT generate_series(1, 20), 'available';
+SELECT generate_series(1, 20), 'available'
+ON CONFLICT (trolley_number) DO NOTHING;
 
 -- Update production lines with calculated available capacity
 UPDATE production_lines 
