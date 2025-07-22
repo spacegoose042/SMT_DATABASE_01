@@ -26,6 +26,6 @@ SECRET_KEY = ""
 API_KEY = ""
 
 # Database initialization
-AUTO_INIT_DB = "true"
+AUTO_INIT_DB = "false"
 DB_SCHEMA_FILE = "database_schema.sql"
 DB_SEED_FILE = "seed_data.sql" 

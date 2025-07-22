@@ -160,14 +160,19 @@ def manual_init_db():
         }), 500
 
 if __name__ == '__main__':
-    # Initialize database on startup
+    # Initialize database on startup (only if AUTO_INIT_DB is set)
     logger.info("Starting SMT Production Schedule Database application")
     
-    init_result = initialize_database()
-    if init_result:
-        logger.info("Database initialization successful")
+    auto_init = os.getenv('AUTO_INIT_DB', 'false').lower() == 'true'
+    if auto_init:
+        logger.info("Auto-initialization enabled, attempting database setup...")
+        init_result = initialize_database()
+        if init_result:
+            logger.info("Database initialization successful")
+        else:
+            logger.warning("Database initialization had issues, but continuing...")
     else:
-        logger.warning("Database initialization had issues, but continuing...")
+        logger.info("Auto-initialization disabled, skipping database setup")
     
     # Get port from environment (Railway sets PORT)
     port = int(os.getenv('PORT', 5000))
