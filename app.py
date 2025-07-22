@@ -308,7 +308,7 @@ def get_production_lines():
         
         cursor.execute("""
             SELECT id, line_name, time_multiplier, active, shifts_per_day, 
-                   hours_per_shift, working_days_per_week, created_at, updated_at
+                   hours_per_shift, days_per_week, created_at, updated_at
             FROM production_lines
             ORDER BY line_name
         """)
@@ -322,7 +322,7 @@ def get_production_lines():
                 'active': row[3],
                 'shifts_per_day': row[4],
                 'hours_per_shift': row[5],
-                'working_days_per_week': row[6],
+                'days_per_week': row[6],
                 'created_at': row[7].isoformat(),
                 'updated_at': row[8].isoformat()
             })
