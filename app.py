@@ -7,7 +7,7 @@ Railway deployment application for database initialization and health checks
 import os
 import psycopg2
 import logging
-from flask import Flask, jsonify
+from flask import Flask, jsonify, send_from_directory
 from datetime import datetime
 
 # Configure logging
@@ -99,13 +99,55 @@ def initialize_database():
 
 @app.route('/')
 def home():
-    """Home endpoint"""
-    return jsonify({
-        'message': 'SMT Production Schedule Database API',
-        'status': 'running',
-        'timestamp': datetime.now().isoformat(),
-        'version': '1.0.0'
-    })
+    """Serve React app"""
+    if os.path.exists('build/index.html'):
+        return send_from_directory('build', 'index.html')
+    else:
+        # Fallback if React build doesn't exist
+        return jsonify({
+            'message': 'SMT Production Schedule Database API',
+            'status': 'running',
+            'timestamp': datetime.now().isoformat(),
+            'version': '1.0.0',
+            'note': 'React UI not built yet'
+        })
+
+@app.route('/<path:path>')
+def serve_static(path):
+    """Serve static files from React build"""
+    if os.path.exists(os.path.join('build', path)):
+        return send_from_directory('build', path)
+    else:
+        return send_from_directory('build', 'index.html')
+
+@app.route('/api/health')
+def api_health():
+    """API health check endpoint"""
+    try:
+        # Test database connection
+        connection = get_database_connection()
+        if connection:
+            cursor = connection.cursor()
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
+            connection.close()
+            db_status = "healthy"
+        else:
+            db_status = "unhealthy"
+        
+        return jsonify({
+            'status': 'healthy',
+            'database': db_status,
+            'timestamp': datetime.now().isoformat()
+        }), 200 if db_status == "healthy" else 503
+        
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        return jsonify({
+            'status': 'unhealthy',
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 503
 
 @app.route('/health')
 def health_check():
