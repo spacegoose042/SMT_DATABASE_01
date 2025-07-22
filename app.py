@@ -231,9 +231,14 @@ def import_csv():
             # Just validate the CSV structure
             import csv
             with open(temp_file_path, 'r', encoding='utf-8') as f:
+                # Skip the first 5 rows (configuration data)
+                for _ in range(5):
+                    next(f)
+                
                 reader = csv.DictReader(f)
                 headers = reader.fieldnames
-                row_count = sum(1 for row in reader)
+                # Count only rows with actual data
+                row_count = sum(1 for row in reader if row.get('Customer') and row.get('WO'))
             
             return jsonify({
                 'message': 'CSV validation completed',

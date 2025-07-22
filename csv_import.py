@@ -256,9 +256,17 @@ class CSVImporter:
         
         try:
             with open(csv_file_path, 'r', encoding='utf-8') as file:
+                # Skip the first 5 rows (configuration data)
+                for _ in range(5):
+                    next(file)
+                
                 reader = csv.DictReader(file)
                 
-                for row_num, row in enumerate(reader, start=2):  # Start at 2 because row 1 is header
+                for row_num, row in enumerate(reader, start=7):  # Start at 7 because we skipped 5 rows + header
+                    # Skip empty rows
+                    if not row.get('Customer') or not row.get('WO'):
+                        continue
+                        
                     self.stats['total_rows'] += 1
                     try:
                         if self.upsert_work_order(row):
