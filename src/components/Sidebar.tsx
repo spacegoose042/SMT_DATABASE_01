@@ -10,6 +10,7 @@ import {
   UserGroupIcon,
   ChartBarIcon,
   XMarkIcon,
+  ClockIcon,
 } from '@heroicons/react/24/outline';
 
 interface SidebarProps {
@@ -22,6 +23,7 @@ const navigation = [
   { name: 'Work Orders', href: '/work-orders', icon: ClipboardDocumentListIcon },
   { name: 'Production Lines', href: '/production-lines', icon: CogIcon },
   { name: 'Schedule', href: '/schedule', icon: CalendarIcon },
+  { name: 'Timeline View', href: '/timeline', icon: ClockIcon },
   { name: 'Customers', href: '/customers', icon: UserGroupIcon },
   { name: 'Reports', href: '/reports', icon: ChartBarIcon },
   { name: 'Settings', href: '/settings', icon: CogIcon },

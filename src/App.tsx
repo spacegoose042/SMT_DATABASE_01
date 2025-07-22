@@ -6,6 +6,8 @@ import Dashboard from './pages/Dashboard';
 import WorkOrders from './pages/WorkOrders';
 import ProductionLines from './pages/ProductionLines';
 import Schedule from './pages/Schedule';
+import TimelineView from './pages/TimelineView';
+import FloorDisplay from './pages/FloorDisplay';
 import Customers from './pages/Customers';
 import Reports from './pages/Reports';
 import Settings from './pages/Settings';
@@ -32,6 +34,8 @@ function App() {
                 <Route path="/work-orders" element={<WorkOrders />} />
                 <Route path="/production-lines" element={<ProductionLines />} />
                 <Route path="/schedule" element={<Schedule />} />
+                <Route path="/timeline" element={<TimelineView />} />
+                <Route path="/floor/:lineId" element={<FloorDisplay />} />
                 <Route path="/customers" element={<Customers />} />
                 <Route path="/reports" element={<Reports />} />
                 <Route path="/settings" element={<Settings />} />
