@@ -129,6 +129,27 @@ class CSVImporter:
             logger.warning(f"Could not parse number: {number_str}")
             return None
     
+    def map_status(self, status_str: str) -> str:
+        """Map CSV status values to database enum values"""
+        if not status_str:
+            return 'Ready'
+        
+        status_str = status_str.strip()
+        
+        # Mapping from CSV values to database enum values
+        status_mapping = {
+            '1st Side Ready': '1st Side Ready',
+            '1st Side Ready ': '1st Side Ready',  # with trailing space
+            '1st Side Ready *': '1st Side Ready',  # with asterisk
+            ' Ready *': 'Ready*',  # with leading space and asterisk
+            'Ready': 'Ready',
+            'Ready *': 'Ready*',  # with asterisk
+            'Ready*': 'Ready*',
+            'Missing TSM-125-01-L-DV': 'Missing TSM-125-01-L-DV'
+        }
+        
+        return status_mapping.get(status_str, 'Ready')  # Default to 'Ready' if not found
+
     def validate_work_order_data(self, row: Dict) -> Tuple[bool, List[str]]:
         """Validate work order data according to business rules"""
         errors = []
@@ -193,6 +214,9 @@ class CSVImporter:
             trolley = self.parse_number(row.get('Trolley', ''))
             line_pos = self.parse_number(row.get('Line Position', ''))
             
+            # Map status to database enum
+            mapped_status = self.map_status(row.get('Status', ''))
+            
             # Check if work order exists
             self.cursor.execute(
                 "SELECT id FROM work_orders WHERE work_order_number = %s",
@@ -219,7 +243,7 @@ class CSVImporter:
                         updated_at = NOW()
                     WHERE work_order_number = %s
                 """, (
-                    assembly_id, qty, row.get('Status', 'Ready'), kit_date, ship_date,
+                    assembly_id, qty, mapped_status, kit_date, ship_date,
                     setup_hrs, time_mins, time_hrs, time_days, trolley, line_id, line_pos, row['WO']
                 ))
                 logger.info(f"Updated work order: {row['WO']}")
@@ -233,7 +257,7 @@ class CSVImporter:
                         trolley_number, line_id, line_position
                     ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """, (
-                    row['WO'], assembly_id, qty, row.get('Status', 'Ready'), kit_date, ship_date,
+                    row['WO'], assembly_id, qty, mapped_status, kit_date, ship_date,
                     setup_hrs, time_mins, time_hrs, time_days, trolley, line_id, line_pos
                 ))
                 logger.info(f"Inserted work order: {row['WO']}")
