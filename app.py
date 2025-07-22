@@ -189,6 +189,160 @@ def manual_init_db():
             'timestamp': datetime.now().isoformat()
         }), 500
 
+@app.route('/api/work-orders')
+def get_work_orders():
+    """Get all work orders"""
+    try:
+        connection = psycopg2.connect(os.getenv('DATABASE_URL'))
+        cursor = connection.cursor()
+        
+        cursor.execute("""
+            SELECT 
+                wo.work_order_number,
+                c.name as customer_name,
+                a.assembly_number,
+                a.revision,
+                wo.quantity,
+                wo.status,
+                wo.kit_date,
+                wo.ship_date,
+                wo.setup_hours_estimated,
+                wo.production_time_minutes_estimated,
+                wo.production_time_hours_estimated,
+                wo.production_time_days_estimated,
+                wo.trolley_number,
+                pl.line_name,
+                wo.line_position,
+                wo.created_at,
+                wo.updated_at
+            FROM work_orders wo
+            JOIN assemblies a ON wo.assembly_id = a.id
+            JOIN customers c ON a.customer_id = c.id
+            LEFT JOIN production_lines pl ON wo.line_id = pl.id
+            ORDER BY wo.created_at DESC
+        """)
+        
+        work_orders = []
+        for row in cursor.fetchall():
+            work_orders.append({
+                'work_order_number': row[0],
+                'customer_name': row[1],
+                'assembly_number': row[2],
+                'revision': row[3],
+                'quantity': row[4],
+                'status': row[5],
+                'kit_date': row[6].isoformat() if row[6] else None,
+                'ship_date': row[7].isoformat() if row[7] else None,
+                'setup_hours_estimated': float(row[8]) if row[8] else None,
+                'production_time_minutes_estimated': float(row[9]) if row[9] else None,
+                'production_time_hours_estimated': float(row[10]) if row[10] else None,
+                'production_time_days_estimated': float(row[11]) if row[11] else None,
+                'trolley_number': row[12],
+                'line_name': row[13],
+                'line_position': row[14],
+                'created_at': row[15].isoformat(),
+                'updated_at': row[16].isoformat()
+            })
+        
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'work_orders': work_orders,
+            'total_count': len(work_orders),
+            'timestamp': datetime.now().isoformat()
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error fetching work orders: {e}")
+        return jsonify({
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
+@app.route('/api/customers')
+def get_customers():
+    """Get all customers"""
+    try:
+        connection = psycopg2.connect(os.getenv('DATABASE_URL'))
+        cursor = connection.cursor()
+        
+        cursor.execute("""
+            SELECT id, name, created_at, updated_at
+            FROM customers
+            WHERE active = true
+            ORDER BY name
+        """)
+        
+        customers = []
+        for row in cursor.fetchall():
+            customers.append({
+                'id': row[0],
+                'name': row[1],
+                'created_at': row[2].isoformat(),
+                'updated_at': row[3].isoformat()
+            })
+        
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'customers': customers,
+            'total_count': len(customers),
+            'timestamp': datetime.now().isoformat()
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error fetching customers: {e}")
+        return jsonify({
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
+@app.route('/api/production-lines')
+def get_production_lines():
+    """Get all production lines"""
+    try:
+        connection = psycopg2.connect(os.getenv('DATABASE_URL'))
+        cursor = connection.cursor()
+        
+        cursor.execute("""
+            SELECT id, line_name, time_multiplier, active, shifts_per_day, 
+                   hours_per_shift, working_days_per_week, created_at, updated_at
+            FROM production_lines
+            ORDER BY line_name
+        """)
+        
+        lines = []
+        for row in cursor.fetchall():
+            lines.append({
+                'id': row[0],
+                'line_name': row[1],
+                'time_multiplier': float(row[2]) if row[2] else 1.0,
+                'active': row[3],
+                'shifts_per_day': row[4],
+                'hours_per_shift': row[5],
+                'working_days_per_week': row[6],
+                'created_at': row[7].isoformat(),
+                'updated_at': row[8].isoformat()
+            })
+        
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'production_lines': lines,
+            'total_count': len(lines),
+            'timestamp': datetime.now().isoformat()
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error fetching production lines: {e}")
+        return jsonify({
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
 @app.route('/api/import-csv', methods=['POST'])
 def import_csv():
     """Import CSV data endpoint"""
