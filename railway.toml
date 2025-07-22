@@ -3,29 +3,19 @@ builder = "nixpacks"
 
 [deploy]
 startCommand = "python app.py"
-healthcheckPath = "/health"
+healthcheckPath = "/api/health"
 healthcheckTimeout = 100
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
 
-[deploy.variables]
-# Database configuration
-DATABASE_URL = ""
-
-# API configuration for future CETEC ERP integration
+[env]
+AUTO_INIT_DB = "false"
+DB_SCHEMA_FILE = "database_schema.sql"
+DB_SEED_FILE = "seed_data.sql"
 CETEC_API_KEY = ""
 CETEC_API_URL = ""
-
-# Application configuration
 APP_ENV = "production"
 DEBUG = "false"
 LOG_LEVEL = "INFO"
-
-# Security
-SECRET_KEY = ""
-API_KEY = ""
-
-# Database initialization
-AUTO_INIT_DB = "false"
-DB_SCHEMA_FILE = "database_schema.sql"
-DB_SEED_FILE = "seed_data.sql" 
+SECRET_KEY = "your-secret-key-change-in-production"
+API_KEY = "your-api-key-change-in-production" 
