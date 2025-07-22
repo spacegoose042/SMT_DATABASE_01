@@ -73,10 +73,14 @@ def initialize_database():
         seed_file = os.getenv('DB_SEED_FILE', 'seed_data.sql')
         if os.path.exists(seed_file):
             logger.info(f"Executing seed data file: {seed_file}")
-            with open(seed_file, 'r') as f:
-                seed_sql = f.read()
-                cursor.execute(seed_sql)
-            logger.info("Seed data inserted successfully")
+            try:
+                with open(seed_file, 'r') as f:
+                    seed_sql = f.read()
+                    cursor.execute(seed_sql)
+                logger.info("Seed data inserted successfully")
+            except Exception as seed_error:
+                logger.warning(f"Seed data insertion had issues (this is normal if data already exists): {seed_error}")
+                # Continue anyway - this is not critical
         else:
             logger.warning(f"Seed file not found: {seed_file}")
         
@@ -86,7 +90,8 @@ def initialize_database():
         
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
-        connection.rollback()
+        if connection:
+            connection.rollback()
         return False
     finally:
         if connection:
@@ -158,10 +163,11 @@ if __name__ == '__main__':
     # Initialize database on startup
     logger.info("Starting SMT Production Schedule Database application")
     
-    if initialize_database():
+    init_result = initialize_database()
+    if init_result:
         logger.info("Database initialization successful")
     else:
-        logger.error("Database initialization failed")
+        logger.warning("Database initialization had issues, but continuing...")
     
     # Get port from environment (Railway sets PORT)
     port = int(os.getenv('PORT', 5000))

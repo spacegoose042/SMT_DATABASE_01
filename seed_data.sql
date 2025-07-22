@@ -64,7 +64,7 @@ INSERT INTO customers (name, active) VALUES
 ('Bladewerx', true)
 ON CONFLICT (name) DO NOTHING;
 
--- Insert sample assemblies from CSV data
+-- Insert sample assemblies from CSV data (only if they don't exist)
 INSERT INTO assemblies (customer_id, assembly_number, revision, description) 
 SELECT 
     c.id,
@@ -122,7 +122,12 @@ FROM (
 ) AS assembly_data(customer_name, assembly_number, revision, description)
 JOIN customers c ON c.name = assembly_data.customer_name
 WHERE c.active = true
-ON CONFLICT (customer_id, assembly_number, revision) DO NOTHING;
+  AND NOT EXISTS (
+    SELECT 1 FROM assemblies a 
+    WHERE a.customer_id = c.id 
+      AND a.assembly_number = assembly_data.assembly_number 
+      AND a.revision = assembly_data.revision
+  );
 
 -- Initialize trolley management (assuming 20 trolleys available)
 INSERT INTO trolley_management (trolley_number, current_status)
