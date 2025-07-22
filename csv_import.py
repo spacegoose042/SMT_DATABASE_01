@@ -173,7 +173,9 @@ class CSVImporter:
         
         # Quantity validation
         qty = self.parse_number(row.get('Qty', ''))
-        if qty is not None and qty <= 0:
+        if qty is None:
+            errors.append("Quantity is required")
+        elif qty <= 0:
             errors.append("Quantity must be positive")
         
         return len(errors) == 0, errors
@@ -213,6 +215,10 @@ class CSVImporter:
             time_days = self.parse_number(row.get('Time (days)', ''))
             trolley = self.parse_number(row.get('Trolley', ''))
             line_pos = self.parse_number(row.get('Line Position', ''))
+            
+            # Set default quantity if missing
+            if qty is None:
+                qty = 1  # Default to 1 if quantity is missing
             
             # Map status to database enum
             mapped_status = self.map_status(row.get('Status', ''))
