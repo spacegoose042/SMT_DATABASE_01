@@ -7,7 +7,7 @@ Railway deployment application for database initialization and health checks
 import os
 import psycopg2
 import logging
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from datetime import datetime
 
 # Configure logging
@@ -188,6 +188,82 @@ def manual_init_db():
             'message': 'Database initialization failed',
             'timestamp': datetime.now().isoformat()
         }), 500
+
+@app.route('/api/import-csv', methods=['POST'])
+def import_csv():
+    """Import CSV data endpoint"""
+    try:
+        # Check if file was uploaded
+        if 'file' not in request.files:
+            return jsonify({
+                'error': 'No file uploaded',
+                'timestamp': datetime.now().isoformat()
+            }), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({
+                'error': 'No file selected',
+                'timestamp': datetime.now().isoformat()
+            }), 400
+        
+        # Save uploaded file temporarily
+        temp_file_path = f"/tmp/{file.filename}"
+        file.save(temp_file_path)
+        
+        # Import CSV using our existing script
+        from csv_import import CSVImporter
+        
+        database_url = os.getenv('DATABASE_URL')
+        if not database_url:
+            return jsonify({
+                'error': 'DATABASE_URL not configured',
+                'timestamp': datetime.now().isoformat()
+            }), 500
+        
+        importer = CSVImporter(database_url)
+        importer.connect()
+        
+        # Check if this is a dry run
+        dry_run = request.form.get('dry_run', 'false').lower() == 'true'
+        
+        if dry_run:
+            # Just validate the CSV structure
+            import csv
+            with open(temp_file_path, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                headers = reader.fieldnames
+                row_count = sum(1 for row in reader)
+            
+            return jsonify({
+                'message': 'CSV validation completed',
+                'headers': headers,
+                'row_count': row_count,
+                'timestamp': datetime.now().isoformat()
+            }), 200
+        else:
+            # Import the data
+            stats = importer.import_csv(temp_file_path)
+            
+            return jsonify({
+                'message': 'CSV import completed',
+                'stats': stats,
+                'timestamp': datetime.now().isoformat()
+            }), 200
+            
+    except Exception as e:
+        logger.error(f"CSV import error: {e}")
+        return jsonify({
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+    finally:
+        # Clean up temp file
+        if 'temp_file_path' in locals():
+            try:
+                os.remove(temp_file_path)
+            except:
+                pass
 
 if __name__ == '__main__':
     # Initialize database on startup (only if AUTO_INIT_DB is set)
