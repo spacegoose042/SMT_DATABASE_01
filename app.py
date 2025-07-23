@@ -104,9 +104,8 @@ def home():
         'message': 'SMT Production Schedule Database API',
         'status': 'running',
         'timestamp': datetime.now().isoformat(),
-        'version': '2.2.0',
-        'note': 'DEBUGGING - This should show if deployment works',
-        'deployment_test': 'SUCCESS_IF_YOU_SEE_THIS'
+        'version': '2.1.0',
+        'note': 'Timeline endpoints are live and working!'
     })
 
 @app.route('/api/test')
