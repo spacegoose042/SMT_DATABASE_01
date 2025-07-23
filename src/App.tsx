@@ -1,16 +1,16 @@
 import React, { useState } from 'react';
 import { Routes, Route } from 'react-router-dom';
-import Sidebar from './components/Sidebar';
-import Header from './components/Header';
-import Dashboard from './pages/Dashboard';
-import WorkOrders from './pages/WorkOrders';
-import ProductionLines from './pages/ProductionLines';
-import Schedule from './pages/Schedule';
-import TimelineView from './pages/TimelineView';
-import FloorDisplay from './pages/FloorDisplay';
-import Customers from './pages/Customers';
-import Reports from './pages/Reports';
-import Settings from './pages/Settings';
+import Sidebar from './components/Sidebar.tsx';
+import Header from './components/Header.tsx';
+import Dashboard from './pages/Dashboard.tsx';
+import WorkOrders from './pages/WorkOrders.tsx';
+import ProductionLines from './pages/ProductionLines.tsx';
+import Schedule from './pages/Schedule.tsx';
+import TimelineView from './pages/TimelineView.tsx';
+import FloorDisplay from './pages/FloorDisplay.tsx';
+import Customers from './pages/Customers.tsx';
+import Reports from './pages/Reports.tsx';
+import Settings from './pages/Settings.tsx';
 
 function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);

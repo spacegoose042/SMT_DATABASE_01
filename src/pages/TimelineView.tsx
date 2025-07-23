@@ -44,9 +44,10 @@ const TimelineView: React.FC = () => {
   const fetchData = async () => {
     try {
       setLoading(true);
+      const baseUrl = process.env.NODE_ENV === 'production' ? '' : 'https://smtdatabase01-production.up.railway.app';
       const [timelineResponse, linesResponse] = await Promise.all([
-        fetch('/api/schedule/timeline'),
-        fetch('/api/production-lines')
+        fetch(`${baseUrl}/api/schedule/timeline`),
+        fetch(`${baseUrl}/api/production-lines`)
       ]);
 
       if (!timelineResponse.ok || !linesResponse.ok) {

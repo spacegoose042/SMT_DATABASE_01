@@ -7,7 +7,7 @@ Railway deployment application for database initialization and health checks
 import os
 import psycopg2
 import logging
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
 from datetime import datetime
 
 # Configure logging
@@ -97,9 +97,9 @@ def initialize_database():
         if connection:
             connection.close()
 
-@app.route('/')
-def home():
-    """Home endpoint"""
+@app.route('/api/status')
+def api_status():
+    """API status endpoint"""
     return jsonify({
         'message': 'SMT Production Schedule Database API',
         'status': 'running',
@@ -614,6 +614,26 @@ def import_csv():
                 os.remove(temp_file_path)
             except:
                 pass
+
+# React App Routes - Serve static files and handle React Router
+@app.route('/static/<path:filename>')
+def serve_static(filename):
+    """Serve static React files"""
+    return send_from_directory('build/static', filename)
+
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def serve_react_app(path):
+    """Serve React app for all non-API routes"""
+    # API routes are handled by specific endpoints above
+    if path.startswith('api/'):
+        return jsonify({'error': 'API endpoint not found'}), 404
+    
+    # For React Router, serve index.html for all routes
+    try:
+        return send_from_directory('build', 'index.html')
+    except:
+        return jsonify({'error': 'React app not found'}), 404
 
 if __name__ == '__main__':
     # Initialize database on startup (only if AUTO_INIT_DB is set)
