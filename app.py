@@ -624,10 +624,21 @@ def serve_react_root():
 def serve_react_static(filename):
     """Serve React static files"""
     try:
-        return send_from_directory('build/static', filename)
+        static_path = os.path.join('build/static', filename)
+        logger.info(f"Requesting static file: {filename}")
+        logger.info(f"Looking for: {static_path}")
+        logger.info(f"Build folder exists: {os.path.exists('build')}")
+        logger.info(f"Build/static exists: {os.path.exists('build/static')}")
+        logger.info(f"Target file exists: {os.path.exists(static_path)}")
+        
+        if os.path.exists(static_path):
+            return send_from_directory('build/static', filename)
+        else:
+            logger.error(f"Static file not found: {static_path}")
+            return jsonify({'error': f'Static file not found: {filename}'}), 404
     except Exception as e:
         logger.error(f"Static file error: {e}")
-        return jsonify({'error': 'Static file not found'}), 404
+        return jsonify({'error': f'Static file error: {str(e)}'}), 404
 
 # Catch-all route for React Router - MUST be last!
 @app.route('/<path:path>')
