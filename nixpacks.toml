@@ -12,5 +12,4 @@ cmds = [
 [phases.start]
 cmd = "python app.py"
 
-[providers]
-python = "3.11" 
+providers = ["python"] 
