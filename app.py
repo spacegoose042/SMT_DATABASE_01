@@ -9,12 +9,20 @@ import psycopg2
 import logging
 from flask import Flask, jsonify, request, send_from_directory
 from datetime import datetime
+from flask_cors import CORS
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-app = Flask(__name__)
+# Configure Flask to serve static files from build folder
+app = Flask(__name__, static_folder='build/static', static_url_path='/static')
+
+# CORS configuration
+cors = CORS(app, resources={
+    r"/api/*": {"origins": "*"},
+    r"/static/*": {"origins": "*"}
+})
 
 def get_database_connection():
     """Get database connection using DATABASE_URL from environment"""
@@ -620,6 +628,7 @@ def serve_react_root():
             'timestamp': datetime.now().isoformat()
         }), 500
 
+# Static file route for React assets
 @app.route('/static/<path:filename>')
 def serve_react_static(filename):
     """Serve React static files"""
@@ -639,23 +648,6 @@ def serve_react_static(filename):
     except Exception as e:
         logger.error(f"Static file error: {e}")
         return jsonify({'error': f'Static file error: {str(e)}'}), 404
-
-# Catch-all route for React Router - MUST be last!
-@app.route('/<path:path>')
-def serve_react_routes(path):
-    """Serve React app for client-side routing"""
-    # Exclude API and static routes - let them be handled by specific routes
-    if path.startswith('api/') or path.startswith('static/'):
-        return jsonify({'error': 'Endpoint not found'}), 404
-    
-    try:
-        if os.path.exists('build/index.html'):
-            return send_from_directory('build', 'index.html')
-        else:
-            return jsonify({'error': 'React app not available'}), 404
-    except Exception as e:
-        logger.error(f"React route serving error: {e}")
-        return jsonify({'error': 'React serving failed'}), 500
 
 if __name__ == '__main__':
     # Initialize database on startup (only if AUTO_INIT_DB is set)
