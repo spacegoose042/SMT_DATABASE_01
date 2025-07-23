@@ -364,35 +364,43 @@ def get_schedule_timeline():
         connection = psycopg2.connect(os.getenv('DATABASE_URL'))
         cursor = connection.cursor()
         
-        # Get all work orders with basic info
+        # Use the same query structure as /api/work-orders (which works)
         cursor.execute("""
             SELECT 
-                work_order_number,
-                customer_name,
-                assembly_number,
-                revision,
-                quantity,
-                status,
-                kit_date,
-                ship_date,
-                setup_hours_estimated,
-                production_time_hours_estimated,
-                production_time_days_estimated,
-                trolley_number,
-                line_name,
-                line_position,
-                created_at,
-                updated_at
-            FROM work_orders
-            WHERE status NOT IN ('Completed', 'Cancelled')
-            ORDER BY line_name NULLS LAST, line_position NULLS LAST
+                wo.work_order_number,
+                c.name as customer_name,
+                a.assembly_number,
+                a.revision,
+                wo.quantity,
+                wo.status,
+                wo.kit_date,
+                wo.ship_date,
+                wo.setup_hours_estimated,
+                wo.production_time_minutes_estimated,
+                wo.production_time_hours_estimated,
+                wo.production_time_days_estimated,
+                wo.trolley_number,
+                pl.line_name,
+                wo.line_position,
+                wo.created_at,
+                wo.updated_at
+            FROM work_orders wo
+            JOIN assemblies a ON wo.assembly_id = a.id
+            JOIN customers c ON a.customer_id = c.id
+            LEFT JOIN production_lines pl ON wo.line_id = pl.id
+            WHERE wo.status NOT IN ('Completed', 'Cancelled')
+            ORDER BY pl.line_name NULLS LAST, wo.line_position NULLS LAST
         """)
         
         work_orders = []
         for row in cursor.fetchall():
             # Calculate total duration in hours
-            days_hours = (row[10] or 0) * 8  # Convert days to hours (8-hour workday)
-            total_hours = (row[8] or 0) + (row[9] or 0) + days_hours
+            setup_hours = float(row[8]) if row[8] else 0.0
+            prod_minutes = float(row[9]) if row[9] else 0.0
+            prod_hours = float(row[10]) if row[10] else 0.0
+            prod_days = float(row[11]) if row[11] else 0.0
+            
+            total_hours = setup_hours + (prod_minutes / 60.0) + prod_hours + (prod_days * 8.0)
             
             work_orders.append({
                 'work_order_number': row[0],
@@ -403,12 +411,12 @@ def get_schedule_timeline():
                 'status': row[5],
                 'kit_date': row[6].isoformat() if row[6] else None,
                 'ship_date': row[7].isoformat() if row[7] else None,
-                'setup_hours_estimated': row[8],
-                'production_hours_estimated': row[9],
+                'setup_hours_estimated': setup_hours,
+                'production_hours_estimated': prod_hours,
                 'total_duration_hours': total_hours,
-                'trolley_number': row[11],
-                'line_name': row[12],
-                'line_position': row[13],
+                'trolley_number': row[12],
+                'line_name': row[13],
+                'line_position': row[14],
                 'scheduled_start_time': None,  # Not yet implemented
                 'scheduled_end_time': None,    # Not yet implemented
             })
