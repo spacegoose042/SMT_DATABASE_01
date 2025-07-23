@@ -104,8 +104,18 @@ def home():
         'message': 'SMT Production Schedule Database API',
         'status': 'running',
         'timestamp': datetime.now().isoformat(),
-        'version': '1.0.0',
-        'note': 'React UI will be added in next phase'
+        'version': '2.1.0',
+        'note': 'Timeline endpoints included in this version'
+    })
+
+@app.route('/api/test')
+def test_endpoint():
+    """Simple test endpoint to verify deployment"""
+    return jsonify({
+        'message': 'Test endpoint working',
+        'version': '2.1.0',
+        'timeline_available': True,
+        'timestamp': datetime.now().isoformat()
     })
 
 @app.route('/api/health')
