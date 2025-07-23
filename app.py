@@ -644,9 +644,9 @@ def serve_react_static(filename):
 @app.route('/<path:path>')
 def serve_react_routes(path):
     """Serve React app for client-side routing"""
-    # Only serve React for non-API routes
-    if path.startswith('api/'):
-        return jsonify({'error': 'API endpoint not found'}), 404
+    # Exclude API and static routes - let them be handled by specific routes
+    if path.startswith('api/') or path.startswith('static/'):
+        return jsonify({'error': 'Endpoint not found'}), 404
     
     try:
         if os.path.exists('build/index.html'):
