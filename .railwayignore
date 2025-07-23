@@ -4,7 +4,7 @@ package-lock.json
 node_modules/
 src/
 public/
-build/
+# build/ - REMOVED so React build is included
 .env.local
 .env.development.local
 .env.test.local
