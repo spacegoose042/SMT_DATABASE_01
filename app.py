@@ -359,91 +359,75 @@ def get_production_lines():
 
 @app.route('/api/schedule/timeline')
 def get_schedule_timeline():
-    """Get timeline view of all work orders scheduled across production lines"""
+    """Get timeline view of all work orders organized by production lines"""
     try:
         connection = psycopg2.connect(os.getenv('DATABASE_URL'))
         cursor = connection.cursor()
         
-        # Get work orders with their line assignments and estimated times
+        # Get all work orders with basic info
         cursor.execute("""
             SELECT 
-                wo.id,
-                wo.work_order_number,
-                c.name as customer_name,
-                a.assembly_number,
-                a.revision,
-                wo.quantity,
-                wo.status,
-                wo.kit_date,
-                wo.ship_date,
-                wo.setup_hours_estimated,
-                wo.production_time_hours_estimated,
-                wo.production_time_days_estimated,
-                wo.trolley_number,
-                pl.id as line_id,
-                pl.line_name,
-                pl.time_multiplier,
-                wo.line_position,
-                wo.scheduled_start_time,
-                wo.scheduled_end_time,
-                wo.created_at,
-                wo.updated_at
-            FROM work_orders wo
-            JOIN assemblies a ON wo.assembly_id = a.id
-            JOIN customers c ON a.customer_id = c.id
-            LEFT JOIN production_lines pl ON wo.line_id = pl.id
-            WHERE wo.status NOT IN ('Completed', 'Cancelled')
-            ORDER BY pl.line_name, wo.line_position, wo.scheduled_start_time NULLS LAST
+                work_order_number,
+                customer_name,
+                assembly_number,
+                revision,
+                quantity,
+                status,
+                kit_date,
+                ship_date,
+                setup_hours_estimated,
+                production_time_hours_estimated,
+                production_time_days_estimated,
+                trolley_number,
+                line_name,
+                line_position,
+                created_at,
+                updated_at
+            FROM work_orders
+            WHERE status NOT IN ('Completed', 'Cancelled')
+            ORDER BY line_name NULLS LAST, line_position NULLS LAST
         """)
         
         work_orders = []
         for row in cursor.fetchall():
-            # Calculate duration in hours (accounting for line multiplier)
-            setup_hours = float(row[9]) if row[9] else 1.0
-            production_hours = float(row[10]) if row[10] else 0.0
-            time_multiplier = float(row[15]) if row[15] else 1.0
-            
-            total_duration_hours = setup_hours + (production_hours * time_multiplier)
+            # Calculate total duration in hours
+            days_hours = (row[10] or 0) * 8  # Convert days to hours (8-hour workday)
+            total_hours = (row[8] or 0) + (row[9] or 0) + days_hours
             
             work_orders.append({
-                'id': row[0],
-                'work_order_number': row[1],
-                'customer_name': row[2],
-                'assembly_number': row[3],
-                'revision': row[4],
-                'quantity': row[5],
-                'status': row[6],
-                'kit_date': row[7].isoformat() if row[7] else None,
-                'ship_date': row[8].isoformat() if row[8] else None,
-                'setup_hours_estimated': setup_hours,
-                'production_hours_estimated': production_hours,
-                'total_duration_hours': total_duration_hours,
-                'trolley_number': row[12],
-                'line_id': row[13],
-                'line_name': row[14],
-                'time_multiplier': time_multiplier,
-                'line_position': row[16],
-                'scheduled_start_time': row[17].isoformat() if row[17] else None,
-                'scheduled_end_time': row[18].isoformat() if row[18] else None,
-                'created_at': row[19].isoformat(),
-                'updated_at': row[20].isoformat()
+                'work_order_number': row[0],
+                'customer_name': row[1],
+                'assembly_number': row[2],
+                'revision': row[3],
+                'quantity': row[4],
+                'status': row[5],
+                'kit_date': row[6].isoformat() if row[6] else None,
+                'ship_date': row[7].isoformat() if row[7] else None,
+                'setup_hours_estimated': row[8],
+                'production_hours_estimated': row[9],
+                'total_duration_hours': total_hours,
+                'trolley_number': row[11],
+                'line_name': row[12],
+                'line_position': row[13],
+                'scheduled_start_time': None,  # Not yet implemented
+                'scheduled_end_time': None,    # Not yet implemented
             })
         
-        cursor.close()
-        connection.close()
-        
         return jsonify({
-            'work_orders': work_orders,
-            'total_count': len(work_orders),
+            'timeline': work_orders,
+            'work_orders': work_orders,  # For compatibility
             'timestamp': datetime.now().isoformat()
-        }), 200
+        })
         
     except Exception as e:
-        logger.error(f"Error fetching schedule timeline: {e}")
+        logger.error(f"Timeline error: {e}")
         return jsonify({
             'error': str(e),
             'timestamp': datetime.now().isoformat()
         }), 500
+    finally:
+        if connection:
+            connection.close()
 
 @app.route('/api/schedule/line/<line_id>')
 def get_line_schedule(line_id):
