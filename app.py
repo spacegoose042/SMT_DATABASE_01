@@ -469,15 +469,13 @@ def get_line_schedule(line_id):
                 wo.production_time_hours_estimated,
                 wo.trolley_number,
                 wo.line_position,
-                wo.scheduled_start_time,
-                wo.scheduled_end_time,
                 wo.ship_date
             FROM work_orders wo
             JOIN assemblies a ON wo.assembly_id = a.id
             JOIN customers c ON a.customer_id = c.id
             WHERE wo.line_id = %s 
             AND wo.status NOT IN ('Completed', 'Cancelled')
-            ORDER BY wo.line_position, wo.scheduled_start_time NULLS LAST
+            ORDER BY wo.line_position NULLS LAST, wo.created_at
             LIMIT 3
         """, (line_id,))
         
@@ -502,9 +500,9 @@ def get_line_schedule(line_id):
                 'total_duration_hours': total_duration_hours,
                 'trolley_number': row[9],
                 'line_position': row[10],
-                'scheduled_start_time': row[11].isoformat() if row[11] else None,
-                'scheduled_end_time': row[12].isoformat() if row[12] else None,
-                'ship_date': row[13].isoformat() if row[13] else None,
+                'scheduled_start_time': None,  # Not yet implemented
+                'scheduled_end_time': None,    # Not yet implemented
+                'ship_date': row[11].isoformat() if row[11] else None,
                 'position_label': 'CURRENT' if i == 0 else f'NEXT {i}'
             })
         
