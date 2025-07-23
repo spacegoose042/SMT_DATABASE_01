@@ -3,4 +3,7 @@ python-dotenv==1.0.0
 Flask==3.0.0
 Flask-CORS==4.0.0
 gunicorn==21.2.0
-argparse 
+argparse
+PyJWT==2.8.0
+bcrypt==4.1.2
+functools32 

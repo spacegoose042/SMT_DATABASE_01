@@ -59,7 +59,8 @@ const FloorDisplay: React.FC = () => {
     
     try {
       setLoading(true);
-      const response = await fetch(`/api/schedule/line/${lineId}`);
+      const baseUrl = process.env.NODE_ENV === 'production' ? '' : 'https://smtdatabase01-production.up.railway.app';
+      const response = await fetch(`${baseUrl}/api/schedule/line/${lineId}`);
       
       if (!response.ok) {
         throw new Error('Failed to fetch line schedule');

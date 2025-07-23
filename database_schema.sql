@@ -6,7 +6,7 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- Create custom types
-CREATE TYPE user_role AS ENUM ('admin', 'scheduler', 'viewer');
+CREATE TYPE user_role AS ENUM ('admin', 'scheduler', 'supervisor', 'floor_view', 'viewer');
 CREATE TYPE work_order_status AS ENUM ('1st Side Ready', 'Ready', 'Ready*', 'Missing TSM-125-01-L-DV', 'Completed', 'Cancelled');
 CREATE TYPE line_status AS ENUM ('running', 'idle', 'setup', 'maintenance', 'down');
 CREATE TYPE line_status_reason AS ENUM ('maintenance', 'malfunction', 'scheduled_downtime', 'estimated_repair', 'other');

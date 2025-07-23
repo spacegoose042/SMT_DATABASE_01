@@ -119,7 +119,7 @@ const TimelineView: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-sy-black-50 flex items-center justify-center">
+      <div className="bg-sy-black-50 flex items-center justify-center py-20">
         <div className="flex items-center space-x-2">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-sy-green-500"></div>
           <span className="text-sy-black-700">Loading timeline...</span>
@@ -130,7 +130,7 @@ const TimelineView: React.FC = () => {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-sy-black-50 flex items-center justify-center">
+      <div className="bg-sy-black-50 flex items-center justify-center py-20">
         <div className="text-center">
           <AlertTriangle className="h-12 w-12 text-red-500 mx-auto mb-4" />
           <h3 className="text-lg font-medium text-sy-black-900 mb-2">Error Loading Timeline</h3>
@@ -149,7 +149,7 @@ const TimelineView: React.FC = () => {
   const groupedWorkOrders = groupWorkOrdersByLine();
 
   return (
-    <div className="min-h-screen bg-sy-black-50">
+    <div className="bg-sy-black-50">
       {/* Header */}
       <div className="bg-white shadow">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -208,7 +208,7 @@ const TimelineView: React.FC = () => {
 
           <div className="p-6">
             {Object.entries(groupedWorkOrders).map(([lineName, orders]) => (
-              <div key={lineName} className="mb-8 last:mb-0">
+              <div key={`line-${lineName}`} className="mb-8 last:mb-0">
                 <div className="flex items-center justify-between mb-4">
                   <h4 className="text-lg font-semibold text-sy-black-900">
                     {lineName}
@@ -225,61 +225,80 @@ const TimelineView: React.FC = () => {
 
                 <div className="space-y-2">
                   {orders.length === 0 ? (
-                    <div className="text-center py-8 text-sy-black-500">
+                    <div key={`empty-${lineName}`} className="text-center py-8 text-sy-black-500">
                       No work orders scheduled for this line
                     </div>
                   ) : (
-                    orders.map((wo, index) => (
-                      <div
-                        key={wo.id}
-                        className="flex items-center p-4 bg-sy-black-50 rounded-lg border border-gray-200 hover:border-sy-green-300 transition-colors"
-                      >
-                        <div className="flex-shrink-0 w-16 text-center">
+                    <>
+                      {/* Column Headers */}
+                      <div className="grid grid-cols-12 gap-4 px-4 py-2 text-xs font-medium text-sy-black-500 uppercase tracking-wider border-b border-gray-200">
+                        <div className="col-span-1 text-center">#</div>
+                        <div className="col-span-4">Work Order & Customer</div>
+                        <div className="col-span-2">Status</div>
+                        <div className="col-span-2 text-center">Quantity</div>
+                        <div className="col-span-2 text-center">Ship Date</div>
+                        <div className="col-span-1 text-right">Rev</div>
+                      </div>
+                      {orders.map((wo, index) => (
+                        <div
+                          key={`${lineName}-${wo.id}`}
+                          className="grid grid-cols-12 gap-4 p-4 bg-sy-black-50 rounded-lg border border-gray-200 hover:border-sy-green-300 transition-colors items-center"
+                        >
+                        {/* Position */}
+                        <div className="col-span-1 text-center">
                           <span className="text-sm font-medium text-sy-black-700">
                             #{index + 1}
                           </span>
                         </div>
                         
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center space-x-4">
-                            <div>
-                              <p className="text-sm font-medium text-sy-black-900">
-                                WO {wo.work_order_number}
-                              </p>
-                              <p className="text-sm text-sy-black-600">
-                                {wo.customer_name} - {wo.assembly_number}
-                              </p>
-                            </div>
-                            
-                            <div className="flex items-center space-x-2">
-                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(wo.status)}`}>
-                                {wo.status}
-                              </span>
-                            </div>
+                        {/* Work Order Info */}
+                        <div className="col-span-4">
+                          <p className="text-sm font-medium text-sy-black-900">
+                            WO {wo.work_order_number}
+                          </p>
+                          <p className="text-sm text-sy-black-600 truncate">
+                            {wo.customer_name} - {wo.assembly_number}
+                          </p>
+                        </div>
+                        
+                        {/* Status */}
+                        <div className="col-span-2">
+                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(wo.status)}`}>
+                            {wo.status}
+                          </span>
+                        </div>
 
-                            <div className="text-right">
-                              <p className="text-sm font-medium text-sy-black-900">
-                                Qty: {wo.quantity.toLocaleString()}
-                              </p>
-                              <p className="text-sm text-sy-black-600">
-                                {formatDuration(wo.total_duration_hours)}
-                              </p>
-                            </div>
+                        {/* Quantity */}
+                        <div className="col-span-2 text-center">
+                          <p className="text-sm font-medium text-sy-black-900">
+                            {wo.quantity.toLocaleString()}
+                          </p>
+                          <p className="text-sm text-sy-black-600">
+                            {formatDuration(wo.total_duration_hours)}
+                          </p>
+                        </div>
 
-                            <div className="text-right">
-                              <p className="text-sm text-sy-black-900">
-                                Ship: {formatDate(wo.ship_date)}
-                              </p>
-                              {wo.trolley_number && (
-                                <p className="text-sm text-sy-black-600">
-                                  Trolley: {wo.trolley_number}
-                                </p>
-                              )}
-                            </div>
-                          </div>
+                        {/* Ship Date */}
+                        <div className="col-span-2 text-center">
+                          <p className="text-sm font-medium text-sy-black-900">
+                            {formatDate(wo.ship_date)}
+                          </p>
+                          {wo.trolley_number && (
+                            <p className="text-sm text-sy-black-600">
+                              Trolley {wo.trolley_number}
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Rev/Details */}
+                        <div className="col-span-1 text-right">
+                          <p className="text-xs text-sy-black-600">
+                            Rev {wo.revision}
+                          </p>
                         </div>
                       </div>
-                    ))
+                      ))}
+                    </>
                   )}
                 </div>
               </div>

@@ -7,8 +7,11 @@ Railway deployment application for database initialization and health checks
 import os
 import psycopg2
 import logging
+import jwt
+import bcrypt
+from functools import wraps
 from flask import Flask, jsonify, request, send_from_directory
-from datetime import datetime
+from datetime import datetime, timedelta
 from flask_cors import CORS
 
 # Configure logging
@@ -17,6 +20,10 @@ logger = logging.getLogger(__name__)
 
 # API-only Flask app - React runs locally
 app = Flask(__name__)
+
+# JWT configuration
+app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'smt-production-database-secret-key-change-in-production')
+app.config['JWT_EXPIRATION_DELTA'] = timedelta(hours=24)
 
 # CORS configuration for local React development
 cors = CORS(app, resources={
@@ -36,6 +43,135 @@ def get_database_connection():
     except Exception as e:
         logger.error(f"Failed to connect to database: {e}")
         return None
+
+# Authentication helper functions
+def hash_password(password):
+    """Hash password using bcrypt"""
+    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+def verify_password(password, password_hash):
+    """Verify password against hash"""
+    return bcrypt.checkpw(password.encode('utf-8'), password_hash.encode('utf-8'))
+
+def generate_jwt_token(user_id, username, role):
+    """Generate JWT token for user"""
+    payload = {
+        'user_id': user_id,
+        'username': username,
+        'role': role,
+        'exp': datetime.utcnow() + app.config['JWT_EXPIRATION_DELTA'],
+        'iat': datetime.utcnow()
+    }
+    return jwt.encode(payload, app.config['JWT_SECRET_KEY'], algorithm='HS256')
+
+def decode_jwt_token(token):
+    """Decode and verify JWT token"""
+    try:
+        payload = jwt.decode(token, app.config['JWT_SECRET_KEY'], algorithms=['HS256'])
+        return payload
+    except jwt.ExpiredSignatureError:
+        return None
+    except jwt.InvalidTokenError:
+        return None
+
+def require_auth(required_roles=None):
+    """Decorator to require authentication and optionally specific roles"""
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            token = None
+            
+            # Get token from Authorization header
+            if 'Authorization' in request.headers:
+                auth_header = request.headers['Authorization']
+                try:
+                    token = auth_header.split(' ')[1]  # Bearer <token>
+                except IndexError:
+                    pass
+            
+            if not token:
+                return jsonify({'error': 'Authentication token required'}), 401
+            
+            # Decode token
+            payload = decode_jwt_token(token)
+            if not payload:
+                return jsonify({'error': 'Invalid or expired token'}), 401
+            
+            # Check role if required
+            if required_roles and payload.get('role') not in required_roles:
+                return jsonify({'error': 'Insufficient permissions'}), 403
+            
+            # Add user info to request context
+            request.current_user = {
+                'user_id': payload['user_id'],
+                'username': payload['username'],
+                'role': payload['role']
+            }
+            
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator
+
+def create_default_users():
+    """Create default users if they don't exist"""
+    try:
+        connection = get_database_connection()
+        if not connection:
+            return False
+        
+        cursor = connection.cursor()
+        
+        # Check if any users exist
+        cursor.execute("SELECT COUNT(*) FROM users")
+        user_count = cursor.fetchone()[0]
+        
+        if user_count > 0:
+            logger.info("Users already exist, skipping default user creation")
+            cursor.close()
+            connection.close()
+            return True
+        
+        # Create default admin user
+        admin_password = os.getenv('ADMIN_PASSWORD', 'admin123')
+        admin_hash = hash_password(admin_password)
+        
+        cursor.execute("""
+            INSERT INTO users (username, email, password_hash, role, active)
+            VALUES (%s, %s, %s, %s, %s)
+        """, ('admin', 'admin@smt.local', admin_hash, 'admin', True))
+        
+        # Create default scheduler user
+        scheduler_password = os.getenv('SCHEDULER_PASSWORD', 'scheduler123')
+        scheduler_hash = hash_password(scheduler_password)
+        
+        cursor.execute("""
+            INSERT INTO users (username, email, password_hash, role, active)
+            VALUES (%s, %s, %s, %s, %s)
+        """, ('scheduler', 'scheduler@smt.local', scheduler_hash, 'scheduler', True))
+        
+        # Create default supervisor user
+        supervisor_password = os.getenv('SUPERVISOR_PASSWORD', 'supervisor123')
+        supervisor_hash = hash_password(supervisor_password)
+        
+        cursor.execute("""
+            INSERT INTO users (username, email, password_hash, role, active)
+            VALUES (%s, %s, %s, %s, %s)
+        """, ('supervisor', 'supervisor@smt.local', supervisor_hash, 'supervisor', True))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        logger.info("Default users created successfully")
+        logger.info(f"Admin user: admin / {admin_password}")
+        logger.info(f"Scheduler user: scheduler / {scheduler_password}")
+        logger.info(f"Supervisor user: supervisor / {supervisor_password}")
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"Failed to create default users: {e}")
+        return False
 
 def initialize_database():
     """Initialize database schema and seed data"""
@@ -90,6 +226,11 @@ def initialize_database():
                 # Continue anyway - this is not critical
         else:
             logger.warning(f"Seed file not found: {seed_file}")
+        
+        # Create default users
+        cursor.close()  # Close cursor before calling create_default_users
+        if not create_default_users():
+            logger.warning("Failed to create default users, but continuing...")
         
         connection.commit()
         logger.info("Database initialization completed successfully")
@@ -200,6 +341,227 @@ def manual_init_db():
     else:
         return jsonify({
             'message': 'Database initialization failed',
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
+# Authentication endpoints
+@app.route('/api/auth/login', methods=['POST'])
+def login():
+    """User login endpoint"""
+    try:
+        data = request.get_json()
+        if not data or not data.get('username') or not data.get('password'):
+            return jsonify({'error': 'Username and password required'}), 400
+        
+        username = data['username'].strip()
+        password = data['password']
+        
+        # Get user from database
+        connection = get_database_connection()
+        if not connection:
+            return jsonify({'error': 'Database connection failed'}), 500
+        
+        cursor = connection.cursor()
+        cursor.execute("""
+            SELECT id, username, email, password_hash, role, active 
+            FROM users 
+            WHERE username = %s AND active = true
+        """, (username,))
+        
+        user = cursor.fetchone()
+        cursor.close()
+        connection.close()
+        
+        if not user or not verify_password(password, user[3]):
+            return jsonify({'error': 'Invalid username or password'}), 401
+        
+        # Generate JWT token
+        token = generate_jwt_token(str(user[0]), user[1], user[4])
+        
+        return jsonify({
+            'token': token,
+            'user': {
+                'id': str(user[0]),
+                'username': user[1],
+                'email': user[2],
+                'role': user[4]
+            },
+            'message': 'Login successful',
+            'timestamp': datetime.now().isoformat()
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Login error: {e}")
+        return jsonify({
+            'error': 'Login failed',
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
+@app.route('/api/auth/me')
+@require_auth()
+def get_current_user():
+    """Get current user information"""
+    try:
+        connection = get_database_connection()
+        if not connection:
+            return jsonify({'error': 'Database connection failed'}), 500
+        
+        cursor = connection.cursor()
+        cursor.execute("""
+            SELECT id, username, email, role, active, created_at 
+            FROM users 
+            WHERE id = %s AND active = true
+        """, (request.current_user['user_id'],))
+        
+        user = cursor.fetchone()
+        cursor.close()
+        connection.close()
+        
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+        
+        return jsonify({
+            'user': {
+                'id': str(user[0]),
+                'username': user[1],
+                'email': user[2],
+                'role': user[3],
+                'active': user[4],
+                'created_at': user[5].isoformat()
+            },
+            'timestamp': datetime.now().isoformat()
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Get current user error: {e}")
+        return jsonify({
+            'error': 'Failed to get user information',
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
+@app.route('/api/users')
+@require_auth(['admin'])
+def get_users():
+    """Get all users (admin only)"""
+    try:
+        connection = get_database_connection()
+        if not connection:
+            return jsonify({'error': 'Database connection failed'}), 500
+        
+        cursor = connection.cursor()
+        cursor.execute("""
+            SELECT id, username, email, role, active, created_at, updated_at
+            FROM users 
+            ORDER BY created_at DESC
+        """)
+        
+        users = []
+        for row in cursor.fetchall():
+            users.append({
+                'id': str(row[0]),
+                'username': row[1],
+                'email': row[2],
+                'role': row[3],
+                'active': row[4],
+                'created_at': row[5].isoformat(),
+                'updated_at': row[6].isoformat()
+            })
+        
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'users': users,
+            'total_count': len(users),
+            'timestamp': datetime.now().isoformat()
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Get users error: {e}")
+        return jsonify({
+            'error': 'Failed to get users',
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
+@app.route('/api/users', methods=['POST'])
+@require_auth(['admin'])
+def create_user():
+    """Create new user (admin only)"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'Request data required'}), 400
+        
+        # Validate required fields
+        required_fields = ['username', 'email', 'password', 'role']
+        for field in required_fields:
+            if not data.get(field):
+                return jsonify({'error': f'{field} is required'}), 400
+        
+        username = data['username'].strip()
+        email = data['email'].strip()
+        password = data['password']
+        role = data['role']
+        
+        # Validate role
+        valid_roles = ['admin', 'scheduler', 'supervisor', 'floor_view', 'viewer']
+        if role not in valid_roles:
+            return jsonify({'error': f'Invalid role. Must be one of: {", ".join(valid_roles)}'}), 400
+        
+        # Hash password
+        password_hash = hash_password(password)
+        
+        connection = get_database_connection()
+        if not connection:
+            return jsonify({'error': 'Database connection failed'}), 500
+        
+        cursor = connection.cursor()
+        
+        # Check if username or email already exists
+        cursor.execute("""
+            SELECT id FROM users WHERE username = %s OR email = %s
+        """, (username, email))
+        
+        if cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({'error': 'Username or email already exists'}), 409
+        
+        # Create user
+        cursor.execute("""
+            INSERT INTO users (username, email, password_hash, role, active)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING id, username, email, role, active, created_at
+        """, (username, email, password_hash, role, True))
+        
+        user = cursor.fetchone()
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'user': {
+                'id': str(user[0]),
+                'username': user[1],
+                'email': user[2],
+                'role': user[3],
+                'active': user[4],
+                'created_at': user[5].isoformat()
+            },
+            'message': 'User created successfully',
+            'timestamp': datetime.now().isoformat()
+        }), 201
+        
+    except psycopg2.IntegrityError as e:
+        logger.error(f"User creation integrity error: {e}")
+        return jsonify({
+            'error': 'Username or email already exists',
+            'timestamp': datetime.now().isoformat()
+        }), 409
+    except Exception as e:
+        logger.error(f"Create user error: {e}")
+        return jsonify({
+            'error': 'Failed to create user',
             'timestamp': datetime.now().isoformat()
         }), 500
 
