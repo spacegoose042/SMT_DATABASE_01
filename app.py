@@ -251,13 +251,23 @@ def api_info():
     return jsonify({
         'message': 'SMT Production Schedule Database API',
         'status': 'running',
-        'version': '2.1.0',
-        'note': 'API-only backend - React runs locally for development',
+        'version': '2.2.0',
+        'note': 'API-only backend with JWT authentication - React runs locally for development',
         'endpoints': {
             'health': '/api/health',
+            'auth_login': '/api/auth/login',
+            'auth_me': '/api/auth/me', 
+            'users': '/api/users',
             'timeline': '/api/schedule/timeline', 
             'work_orders': '/api/work-orders',
             'production_lines': '/api/production-lines'
+        },
+        'auth': {
+            'default_users': {
+                'admin': 'admin123',
+                'scheduler': 'scheduler123', 
+                'supervisor': 'supervisor123'
+            }
         },
         'timestamp': datetime.now().isoformat()
     })
