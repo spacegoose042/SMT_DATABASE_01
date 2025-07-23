@@ -981,6 +981,61 @@ def import_csv():
             except:
                 pass
 
+# Temporary endpoint for creating admin user (remove after initial setup)
+@app.route('/api/init-admin', methods=['POST'])
+def init_admin_user():
+    """Create initial admin user - temporary endpoint for setup"""
+    try:
+        connection = get_database_connection()
+        if not connection:
+            return jsonify({'error': 'Database connection failed'}), 500
+        
+        cursor = connection.cursor()
+        
+        # Check if admin user already exists
+        cursor.execute("SELECT id FROM users WHERE username = 'admin'")
+        if cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({'message': 'Admin user already exists'}), 200
+        
+        # Create admin user
+        admin_password = 'admin123'
+        admin_hash = hash_password(admin_password)
+        
+        cursor.execute("""
+            INSERT INTO users (username, email, password_hash, role, active)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING id, username, email, role
+        """, ('admin', 'admin@smt.local', admin_hash, 'admin', True))
+        
+        user = cursor.fetchone()
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'message': 'Admin user created successfully',
+            'user': {
+                'id': str(user[0]),
+                'username': user[1], 
+                'email': user[2],
+                'role': user[3]
+            },
+            'credentials': {
+                'username': 'admin',
+                'password': 'admin123'
+            },
+            'timestamp': datetime.now().isoformat()
+        }), 201
+        
+    except Exception as e:
+        logger.error(f"Init admin error: {e}")
+        return jsonify({
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
 if __name__ == '__main__':
     # Initialize database on startup (only if AUTO_INIT_DB is set)
     logger.info("Starting SMT Production Schedule Database application v2.1 - Timeline Ready")
