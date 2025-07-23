@@ -615,25 +615,48 @@ def import_csv():
             except:
                 pass
 
-# React App Routes - Serve static files and handle React Router
-@app.route('/static/<path:filename>')
-def serve_static(filename):
-    """Serve static React files"""
-    return send_from_directory('build/static', filename)
+# React App Routes - Serve static files and handle React Router - TEMPORARILY DISABLED
+# @app.route('/static/<path:filename>')
+# def serve_static(filename):
+#     """Serve static React files"""
+#     try:
+#         return send_from_directory('build/static', filename)
+#     except Exception as e:
+#         logger.error(f"Static file error: {e}")
+#         return jsonify({'error': 'Static file not found'}), 404
 
-@app.route('/', defaults={'path': ''})
-@app.route('/<path:path>')
-def serve_react_app(path):
-    """Serve React app for all non-API routes"""
-    # API routes are handled by specific endpoints above
-    if path.startswith('api/'):
-        return jsonify({'error': 'API endpoint not found'}), 404
+# @app.route('/', defaults={'path': ''})
+# @app.route('/<path:path>')
+# def serve_react_app(path):
+#     """Serve React app for all non-API routes"""
+#     # API routes are handled by specific endpoints above
+#     if path.startswith('api/'):
+#         return jsonify({'error': 'API endpoint not found'}), 404
     
-    # For React Router, serve index.html for all routes
-    try:
-        return send_from_directory('build', 'index.html')
-    except:
-        return jsonify({'error': 'React app not found'}), 404
+#     # For React Router, serve index.html for all routes
+#     try:
+#         if os.path.exists('build/index.html'):
+#             return send_from_directory('build', 'index.html')
+#         else:
+#             logger.error("React build/index.html not found")
+#             return jsonify({'error': 'React app not found - build folder missing'}), 404
+#     except Exception as e:
+#         logger.error(f"React serving error: {e}")
+#         return jsonify({'error': f'React serving error: {str(e)}'}), 404
+
+# Temporary root route for debugging
+@app.route('/')
+def temp_home():
+    """Temporary home route while debugging React serving"""
+    return jsonify({
+        'message': 'SMT Production Schedule Database API',
+        'status': 'running',
+        'version': '2.1.0',
+        'note': 'React serving temporarily disabled for debugging',
+        'build_folder_exists': os.path.exists('build'),
+        'build_index_exists': os.path.exists('build/index.html'),
+        'timestamp': datetime.now().isoformat()
+    })
 
 if __name__ == '__main__':
     # Initialize database on startup (only if AUTO_INIT_DB is set)
