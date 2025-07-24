@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
-import { Clock, Package, User, Calendar, AlertCircle, Wifi, WifiOff } from 'lucide-react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { Clock, Package, User, Calendar, AlertCircle, Wifi, WifiOff, ArrowLeftIcon } from 'lucide-react';
 import { useSocket } from '../contexts/SocketContext.tsx';
 
 interface Job {
@@ -37,6 +37,7 @@ interface LineScheduleData {
 
 const FloorDisplay: React.FC = () => {
   const { lineId } = useParams<{ lineId: string }>();
+  const navigate = useNavigate();
   const [scheduleData, setScheduleData] = useState<LineScheduleData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -172,13 +173,22 @@ const FloorDisplay: React.FC = () => {
         <div className="text-center">
           <AlertCircle className="h-20 w-20 text-red-400 mx-auto mb-6" />
           <h3 className="text-3xl font-medium text-white mb-4">Error Loading Schedule</h3>
-          <p className="text-xl text-gray-300 mb-8">{error || 'Schedule not found'}</p>
-          <button
-            onClick={fetchLineSchedule}
-            className="bg-sy-green-600 hover:bg-sy-green-700 text-white px-8 py-4 rounded-lg text-xl"
-          >
-            Try Again
-          </button>
+          <p className="text-xl text-gray-300 mb-8">{error || 'Production line not found'}</p>
+          <div className="flex gap-4 justify-center">
+            <button
+              onClick={fetchLineSchedule}
+              className="bg-sy-green-600 hover:bg-sy-green-700 text-white px-8 py-4 rounded-lg text-xl"
+            >
+              Try Again
+            </button>
+            <button
+              onClick={() => navigate('/floor-display-select')}
+              className="bg-gray-600 hover:bg-gray-700 text-white px-8 py-4 rounded-lg text-xl flex items-center"
+            >
+              <ArrowLeftIcon className="h-6 w-6 mr-2" />
+              Back to Selection
+            </button>
+          </div>
         </div>
       </div>
     );

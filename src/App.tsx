@@ -12,6 +12,7 @@ import ProductionLines from './pages/ProductionLines.tsx';
 import Schedule from './pages/Schedule.tsx';
 import TimelineView from './pages/TimelineView.tsx';
 import FloorDisplay from './pages/FloorDisplay.tsx';
+import FloorDisplaySelect from './pages/FloorDisplaySelect.tsx';
 import Customers from './pages/Customers.tsx';
 import Reports from './pages/Reports.tsx';
 import Settings from './pages/Settings.tsx';
@@ -64,6 +65,9 @@ function App() {
                           
                           {/* Timeline - All authenticated users */}
                           <Route path="/timeline" element={<TimelineView />} />
+                          
+                          {/* Floor Display Selection - All authenticated users */}
+                          <Route path="/floor-display-select" element={<FloorDisplaySelect />} />
                           
                           {/* Floor Display - Public access for floor monitors */}
                           <Route path="/floor/:lineId" element={<FloorDisplay />} />
