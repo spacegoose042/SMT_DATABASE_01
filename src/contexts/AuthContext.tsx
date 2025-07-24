@@ -26,7 +26,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  const baseUrl = process.env.NODE_ENV === 'production' ? '' : 'https://smtdatabase01-production.up.railway.app';
+      const baseUrl = process.env.NODE_ENV === 'production' 
+      ? window.location.origin 
+      : 'https://smtdatabase01-production.up.railway.app';
 
   // Check if user is already logged in on app start
   useEffect(() => {

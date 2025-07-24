@@ -100,7 +100,9 @@ const FloorDisplay: React.FC = () => {
     
     try {
       setLoading(true);
-      const baseUrl = process.env.NODE_ENV === 'production' ? '' : 'https://smtdatabase01-production.up.railway.app';
+      const baseUrl = process.env.NODE_ENV === 'production' 
+        ? window.location.origin 
+        : 'https://smtdatabase01-production.up.railway.app';
       const response = await fetch(`${baseUrl}/api/schedule/line/${lineId}`);
       
       if (!response.ok) {

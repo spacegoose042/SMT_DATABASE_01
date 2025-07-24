@@ -158,7 +158,9 @@ const TimelineView: React.FC = () => {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const baseUrl = process.env.NODE_ENV === 'production' ? '' : 'https://smtdatabase01-production.up.railway.app';
+      const baseUrl = process.env.NODE_ENV === 'production' 
+        ? window.location.origin 
+        : 'https://smtdatabase01-production.up.railway.app';
       const [timelineResponse, linesResponse] = await Promise.all([
         fetch(`${baseUrl}/api/schedule/timeline`),
         fetch(`${baseUrl}/api/production-lines`)

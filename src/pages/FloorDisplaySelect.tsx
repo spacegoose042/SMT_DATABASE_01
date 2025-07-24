@@ -31,7 +31,9 @@ const FloorDisplaySelect: React.FC = () => {
     try {
       console.log('Fetching production lines...');
       setLoading(true);
-      const baseUrl = process.env.NODE_ENV === 'production' ? '' : 'https://smtdatabase01-production.up.railway.app';
+      const baseUrl = process.env.NODE_ENV === 'production' 
+        ? window.location.origin 
+        : 'https://smtdatabase01-production.up.railway.app';
       const response = await fetch(`${baseUrl}/api/production-lines`);
       
       console.log('Response status:', response.status);
