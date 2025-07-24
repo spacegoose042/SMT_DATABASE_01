@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, Clock, Users, AlertTriangle } from 'lucide-react';
+import { Clock, Users, AlertTriangle } from 'lucide-react';
 import { useSocket } from '../contexts/SocketContext.tsx';
 
 interface WorkOrder {
@@ -38,14 +38,10 @@ const TimelineView: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [selectedWeeks, setSelectedWeeks] = useState(4);
   const [lastUpdated, setLastUpdated] = useState<string>('');
-  const { connected, joinRooms, onWorkOrderUpdate } = useSocket();
+  const { connected, onWorkOrderUpdate } = useSocket();
 
-  // Join timeline room for real-time updates
-  useEffect(() => {
-    if (connected) {
-      joinRooms(['timeline']);
-    }
-  }, [connected, joinRooms]);
+  // SSE automatically connects - no need for room management like Socket.IO
+  // Real-time updates are handled automatically
 
   // Listen for real-time work order updates
   useEffect(() => {

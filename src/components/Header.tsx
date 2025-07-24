@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bars3Icon, UserIcon, WifiIcon } from '@heroicons/react/24/outline';
+import { Bars3Icon, UserIcon } from '@heroicons/react/24/outline';
 import { CheckCircleIcon, XCircleIcon } from '@heroicons/react/24/solid';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { useSocket } from '../contexts/SocketContext.tsx';
@@ -9,7 +9,7 @@ interface HeaderProps {
 }
 
 function Header({ onMenuClick }: HeaderProps) {
-  const { user, logout, hasRole } = useAuth();
+  const { user, logout } = useAuth();
   const { connected } = useSocket();
 
   return (
