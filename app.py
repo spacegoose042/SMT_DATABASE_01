@@ -1662,6 +1662,49 @@ def handle_leave_room(data):
     else:
         emit('error', {'message': f'Invalid room: {room}'})
 
+# Test endpoint for broadcasting
+@app.route('/api/test/broadcast', methods=['POST'])
+@require_auth(['admin'])
+def test_broadcast():
+    """Test endpoint to trigger status update broadcasting"""
+    try:
+        # Sample work order data for testing
+        test_work_order_data = {
+            'id': 'test-12345',
+            'work_order_number': 'TEST-001',
+            'qr_code': 'TEST-001-1',
+            'customer_name': 'Test Customer',
+            'assembly_number': 'TEST-ASSEMBLY',
+            'line_name': '1-EURO 264 (1)',
+            'line_number': 1,
+            'quantity': 100,
+            'trolley_number': 1
+        }
+        
+        old_status = '1st Side Ready'
+        new_status = 'In Progress'
+        updated_by = 'Test User'
+        
+        # Trigger the broadcast
+        broadcast_status_update(test_work_order_data, old_status, new_status, updated_by)
+        
+        return jsonify({
+            'message': 'Test broadcast sent successfully',
+            'test_data': {
+                'work_order': test_work_order_data,
+                'status_change': {
+                    'old_status': old_status,
+                    'new_status': new_status,
+                    'updated_by': updated_by
+                }
+            },
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        logger.error(f"Test broadcast error: {e}")
+        return jsonify({'error': 'Test broadcast failed'}), 500
+
 # SSE Health check endpoint
 @app.route('/api/sse/health')
 def sse_health():
