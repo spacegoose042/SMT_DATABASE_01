@@ -1168,57 +1168,69 @@ def mobile_update_work_order_status(work_order_id):
         if not connection:
             return jsonify({'error': 'Database connection failed'}), 500
         
-        cursor = connection.cursor()
-        
-        # Get current work order
-        cursor.execute("""
-            SELECT wo.work_order_number, wo.status, c.name, a.assembly_number
-            FROM work_orders wo
-            JOIN assemblies a ON wo.assembly_id = a.id
-            JOIN customers c ON a.customer_id = c.id
-            WHERE wo.id = %s
-        """, (work_order_id,))
-        
-        work_order = cursor.fetchone()
-        if not work_order:
+        try:
+            cursor = connection.cursor()
+            
+            # Get current work order
+            cursor.execute("""
+                SELECT wo.work_order_number, wo.status, c.name, a.assembly_number
+                FROM work_orders wo
+                JOIN assemblies a ON wo.assembly_id = a.id
+                JOIN customers c ON a.customer_id = c.id
+                WHERE wo.id = %s
+            """, (work_order_id,))
+            
+            work_order = cursor.fetchone()
+            if not work_order:
+                cursor.close()
+                connection.close()
+                return jsonify({'error': 'Work order not found'}), 404
+            
+            old_status = work_order[1]
+            
+            # Update work order status
+            cursor.execute("""
+                UPDATE work_orders 
+                SET status = %s, updated_at = NOW()
+                WHERE id = %s
+            """, (new_status, work_order_id))
+            
+            # Create status history record
+            cursor.execute("""
+                INSERT INTO work_order_status_history 
+                (work_order_id, old_status, new_status, changed_by, notes, changed_at)
+                VALUES (%s, %s, %s, %s, %s, NOW())
+            """, (work_order_id, old_status, new_status, updated_by, notes))
+            
+            connection.commit()
             cursor.close()
             connection.close()
-            return jsonify({'error': 'Work order not found'}), 404
-        
-        old_status = work_order[1]
-        
-        # Update work order status
-        cursor.execute("""
-            UPDATE work_orders 
-            SET status = %s, updated_at = NOW()
-            WHERE id = %s
-        """, (new_status, work_order_id))
-        
-        # Create status history record
-        cursor.execute("""
-            INSERT INTO work_order_status_history 
-            (work_order_id, old_status, new_status, changed_by, notes, changed_at)
-            VALUES (%s, %s, %s, %s, %s, NOW())
-        """, (work_order_id, old_status, new_status, updated_by, notes))
-        
-        connection.commit()
-        cursor.close()
-        connection.close()
-        
-        return jsonify({
-            'message': 'Status updated successfully',
-            'work_order_number': work_order[0],
-            'old_status': old_status,
-            'new_status': new_status,
-            'updated_by': updated_by,
-            'notes': notes,
-            'timestamp': datetime.now().isoformat()
-        }), 200
+            
+            return jsonify({
+                'message': 'Status updated successfully',
+                'work_order_number': work_order[0],
+                'old_status': old_status,
+                'new_status': new_status,
+                'updated_by': updated_by,
+                'notes': notes,
+                'timestamp': datetime.now().isoformat()
+            }), 200
+            
+        except Exception as db_error:
+            logger.error(f"Database error in mobile status update: {db_error}")
+            if connection:
+                connection.rollback()
+                connection.close()
+            return jsonify({
+                'error': f'Database operation failed: {str(db_error)}',
+                'timestamp': datetime.now().isoformat()
+            }), 500
         
     except Exception as e:
         logger.error(f"Mobile status update error: {e}")
         return jsonify({
             'error': 'Status update failed',
+            'details': str(e),
             'timestamp': datetime.now().isoformat()
         }), 500
 
