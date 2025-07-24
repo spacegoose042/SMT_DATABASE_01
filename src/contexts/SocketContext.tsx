@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
+import { useAuth } from './AuthContext.tsx';
 
 interface WorkOrderUpdate {
   type: 'status_update';
@@ -37,26 +38,25 @@ interface SSEContextType {
 
 const SSEContext = createContext<SSEContextType | undefined>(undefined);
 
-interface SSEProviderProps {
-  children: ReactNode;
-}
-
-export function SocketProvider({ children }: SSEProviderProps) {
+export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [connected, setConnected] = useState(false);
   const [eventSource, setEventSource] = useState<EventSource | null>(null);
-  const [workOrderCallbacks, setWorkOrderCallbacks] = useState<Array<(update: WorkOrderUpdate) => void>>([]);
-  const [generalCallbacks, setGeneralCallbacks] = useState<Array<(update: GeneralUpdate) => void>>([]);
+  const { user } = useAuth();
+  
+  // Use refs to store callbacks to avoid recreating SSE connection
+  const workOrderCallbacksRef = useRef<((update: WorkOrderUpdate) => void)[]>([]);
+  const generalCallbacksRef = useRef<((data: any) => void)[]>([]);
 
   useEffect(() => {
-    // Get auth token from local storage or auth context
     const token = localStorage.getItem('auth_token');
     if (!token) {
-      console.log('No auth token found, skipping SSE connection');
+      console.log('❌ No auth token available for SSE');
       return;
     }
 
-    // Determine the SSE URL based on environment
     const isDev = process.env.NODE_ENV === 'development';
+    
+    // Always use production URL for SSE since we're running local dev against production
     const baseUrl = isDev 
       ? 'https://smtdatabase01-production.up.railway.app'
       : window.location.origin;
@@ -78,16 +78,24 @@ export function SocketProvider({ children }: SSEProviderProps) {
         const data = JSON.parse(event.data);
         console.log('📡 Received SSE update:', data);
 
-        if (data.type === 'status_update') {
-          // Notify all work order update callbacks
-          workOrderCallbacks.forEach(callback => callback(data));
-        } else if (data.type === 'connected') {
-          console.log('Server connection confirmed:', data.message);
-        } else if (data.type === 'heartbeat') {
-          console.log('💓 SSE heartbeat received');
+        // Route the update to appropriate callbacks
+        if (data.type === 'work_order_update') {
+          workOrderCallbacksRef.current.forEach(callback => {
+            try {
+              callback(data);
+            } catch (error) {
+              console.error('Error in work order callback:', error);
+            }
+          });
         } else {
-          // Notify general update callbacks
-          generalCallbacks.forEach(callback => callback(data));
+          // General update - send to all general callbacks
+          generalCallbacksRef.current.forEach(callback => {
+            try {
+              callback(data);
+            } catch (error) {
+              console.error('Error in general callback:', error);
+            }
+          });
         }
       } catch (error) {
         console.error('Error parsing SSE message:', error);
@@ -107,23 +115,23 @@ export function SocketProvider({ children }: SSEProviderProps) {
       newEventSource.close();
       setConnected(false);
     };
-  }, [workOrderCallbacks, generalCallbacks]);
+  }, [user]); // Depend on user to reconnect when auth changes
 
   const onWorkOrderUpdate = (callback: (update: WorkOrderUpdate) => void) => {
-    setWorkOrderCallbacks(prev => [...prev, callback]);
+    workOrderCallbacksRef.current.push(callback);
     
     // Return cleanup function
     return () => {
-      setWorkOrderCallbacks(prev => prev.filter(cb => cb !== callback));
+      workOrderCallbacksRef.current = workOrderCallbacksRef.current.filter(cb => cb !== callback);
     };
   };
 
-  const onGeneralUpdate = (callback: (update: GeneralUpdate) => void) => {
-    setGeneralCallbacks(prev => [...prev, callback]);
+  const onGeneralUpdate = (callback: (data: any) => void) => {
+    generalCallbacksRef.current.push(callback);
     
     // Return cleanup function
     return () => {
-      setGeneralCallbacks(prev => prev.filter(cb => cb !== callback));
+      generalCallbacksRef.current = generalCallbacksRef.current.filter(cb => cb !== callback);
     };
   };
 

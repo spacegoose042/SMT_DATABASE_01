@@ -296,7 +296,7 @@ const TimelineView: React.FC = () => {
                       </div>
                       {orders.map((wo, index) => (
                         <div
-                          key={`${lineName}-${wo.id}`}
+                          key={`${lineName}-${wo.id || wo.work_order_number}-${index}`}
                           className="grid grid-cols-12 gap-4 p-4 bg-sy-black-50 rounded-lg border border-gray-200 hover:border-sy-green-300 transition-colors items-center"
                         >
                         {/* Position */}
