@@ -263,7 +263,8 @@ def api_info():
             'production_lines': '/api/production-lines',
             'mobile_search': '/api/mobile/work-orders/search',
             'mobile_update_status': '/api/mobile/work-orders/{id}/status',
-            'mobile_statuses': '/api/mobile/statuses'
+            'mobile_statuses': '/api/mobile/statuses',
+            'mobile_qr_lookup': '/api/mobile/qr/{qr_code}'
         },
         'auth': {
             'default_users': {
@@ -1352,6 +1353,149 @@ def mobile_get_valid_statuses():
         'statuses': statuses,
         'timestamp': datetime.now().isoformat()
     }), 200
+
+@app.route('/api/mobile/qr/<qr_code>')
+@require_auth(['admin', 'scheduler', 'supervisor', 'floor_view'])
+def mobile_qr_lookup(qr_code):
+    """Look up work order by QR code (format: work_order_number-line_number)"""
+    try:
+        # Parse QR code format: work_order_number-line_number
+        if '-' not in qr_code:
+            return jsonify({
+                'error': 'Invalid QR code format. Expected: work_order_number-line_number',
+                'example': '13906.2-1',
+                'timestamp': datetime.now().isoformat()
+            }), 400
+        
+        # Split QR code into work order number and line number
+        parts = qr_code.rsplit('-', 1)  # Split from right to handle numbers with decimals
+        if len(parts) != 2:
+            return jsonify({
+                'error': 'Invalid QR code format. Expected: work_order_number-line_number',
+                'example': '13906.2-1',
+                'timestamp': datetime.now().isoformat()
+            }), 400
+        
+        work_order_number = parts[0]
+        try:
+            line_number = int(parts[1])
+        except ValueError:
+            return jsonify({
+                'error': 'Line number must be an integer',
+                'provided': parts[1],
+                'timestamp': datetime.now().isoformat()
+            }), 400
+        
+        connection = get_database_connection()
+        if not connection:
+            return jsonify({'error': 'Database connection failed'}), 500
+        
+        cursor = connection.cursor()
+        
+        # Look up work order by work_order_number and line_number
+        cursor.execute("""
+            SELECT 
+                wo.id,
+                wo.work_order_number,
+                wo.line_number,
+                c.name as customer_name,
+                a.assembly_number,
+                a.revision,
+                wo.quantity,
+                wo.status,
+                pl.line_name,
+                wo.trolley_number,
+                wo.ship_date,
+                wo.kit_date,
+                wo.setup_hours_estimated,
+                wo.production_time_hours_estimated,
+                wo.line_position,
+                wo.created_at,
+                wo.updated_at
+            FROM work_orders wo
+            JOIN assemblies a ON wo.assembly_id = a.id
+            JOIN customers c ON a.customer_id = c.id
+            LEFT JOIN production_lines pl ON wo.line_id = pl.id
+            WHERE wo.work_order_number = %s AND wo.line_number = %s
+        """, (work_order_number, line_number))
+        
+        work_order = cursor.fetchone()
+        if not work_order:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'error': 'Work order not found',
+                'qr_code': qr_code,
+                'work_order_number': work_order_number,
+                'line_number': line_number,
+                'timestamp': datetime.now().isoformat()
+            }), 404
+        
+        # Get recent status history
+        cursor.execute("""
+            SELECT old_status, new_status, changed_by, notes, changed_at
+            FROM work_order_status_history
+            WHERE work_order_id = %s
+            ORDER BY changed_at DESC
+            LIMIT 10
+        """, (work_order[0],))
+        
+        status_history = []
+        for row in cursor.fetchall():
+            status_history.append({
+                'old_status': row[0],
+                'new_status': row[1],
+                'changed_by': row[2],
+                'notes': row[3],
+                'changed_at': row[4].isoformat()
+            })
+        
+        cursor.close()
+        connection.close()
+        
+        # Build response with QR code included
+        work_order_data = {
+            'id': work_order[0],
+            'work_order_number': work_order[1],
+            'line_number': work_order[2],
+            'qr_code': qr_code,  # Include the scanned QR code
+            'customer_name': work_order[3],
+            'assembly_number': work_order[4],
+            'revision': work_order[5],
+            'quantity': work_order[6],
+            'status': work_order[7],
+            'line_name': work_order[8],
+            'trolley_number': work_order[9],
+            'ship_date': work_order[10].isoformat() if work_order[10] else None,
+            'kit_date': work_order[11].isoformat() if work_order[11] else None,
+            'setup_hours_estimated': float(work_order[12]) if work_order[12] else None,
+            'production_hours_estimated': float(work_order[13]) if work_order[13] else None,
+            'line_position': work_order[14],
+            'created_at': work_order[15].isoformat(),
+            'updated_at': work_order[16].isoformat(),
+            'status_history': status_history
+        }
+        
+        return jsonify({
+            'work_order': work_order_data,
+            'qr_lookup': {
+                'qr_code': qr_code,
+                'work_order_number': work_order_number,
+                'line_number': line_number,
+                'lookup_time': datetime.now().isoformat()
+            },
+            'message': 'Work order found via QR code',
+            'timestamp': datetime.now().isoformat()
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"QR lookup error: {e}")
+        return jsonify({
+            'error': 'QR code lookup failed',
+            'qr_code': qr_code,
+            'details': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
 
 if __name__ == '__main__':
     # Initialize database on startup (only if AUTO_INIT_DB is set)
