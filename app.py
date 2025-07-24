@@ -13,7 +13,7 @@ from functools import wraps
 from flask import Flask, jsonify, request, send_from_directory
 from datetime import datetime, timedelta
 from flask_cors import CORS
-from flask_socketio import SocketIO, emit, join_room, leave_room
+# from flask_socketio import SocketIO, emit, join_room, leave_room
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -22,8 +22,8 @@ logger = logging.getLogger(__name__)
 # API-only Flask app - React runs locally
 app = Flask(__name__)
 
-# Configure Flask-SocketIO with CORS support
-socketio = SocketIO(app, cors_allowed_origins="*", logger=True, engineio_logger=True)
+# Configure Flask-SocketIO with CORS support - TEMPORARILY DISABLED
+# socketio = SocketIO(app, cors_allowed_origins="*", logger=True, engineio_logger=True)
 
 # JWT configuration
 app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'smt-production-database-secret-key-change-in-production')
@@ -1531,50 +1531,50 @@ def mobile_qr_lookup(qr_code):
         }), 500
 
 # WebSocket Event Handlers for Real-time Updates
-@socketio.on('connect')
-def handle_connect():
-    """Handle client connection"""
-    logger.info(f"Client connected: {request.sid}")
-    emit('connected', {'message': 'Connected to SMT Database real-time updates'})
+# @socketio.on('connect')
+# def handle_connect():
+#     """Handle client connection"""
+#     logger.info(f"Client connected: {request.sid}")
+#     emit('connected', {'message': 'Connected to SMT Database real-time updates'})
 
-@socketio.on('disconnect')
-def handle_disconnect():
-    """Handle client disconnection"""
-    logger.info(f"Client disconnected: {request.sid}")
+# @socketio.on('disconnect')
+# def handle_disconnect():
+#     """Handle client disconnection"""
+#     logger.info(f"Client disconnected: {request.sid}")
 
-@socketio.on('join_updates')
-def handle_join_updates(data):
-    """Join clients to update rooms for targeted notifications"""
-    try:
-        # Clients can join different rooms for targeted updates
-        rooms = data.get('rooms', ['general'])
+# @socketio.on('join_updates')
+# def handle_join_updates(data):
+#     """Join clients to update rooms for targeted notifications"""
+#     try:
+#         # Clients can join different rooms for targeted updates
+#         rooms = data.get('rooms', ['general'])
         
-        for room in rooms:
-            if room in ['general', 'timeline', 'floor_display', 'mobile']:
-                join_room(room)
-                logger.info(f"Client {request.sid} joined room: {room}")
+#         for room in rooms:
+#             if room in ['general', 'timeline', 'floor_display', 'mobile']:
+#                 join_room(room)
+#                 logger.info(f"Client {request.sid} joined room: {room}")
         
-        emit('joined_rooms', {'rooms': rooms, 'message': 'Joined update rooms'})
+#         emit('joined_rooms', {'rooms': rooms, 'message': 'Joined update rooms'})
         
-    except Exception as e:
-        logger.error(f"Error joining rooms: {e}")
-        emit('error', {'message': 'Failed to join update rooms'})
+#     except Exception as e:
+#         logger.error(f"Error joining rooms: {e}")
+#         emit('error', {'message': 'Failed to join update rooms'})
 
-@socketio.on('leave_updates')
-def handle_leave_updates(data):
-    """Leave update rooms"""
-    try:
-        rooms = data.get('rooms', ['general'])
+# @socketio.on('leave_updates')
+# def handle_leave_updates(data):
+#     """Leave update rooms"""
+#     try:
+#         rooms = data.get('rooms', ['general'])
         
-        for room in rooms:
-            leave_room(room)
-            logger.info(f"Client {request.sid} left room: {room}")
+#         for room in rooms:
+#             leave_room(room)
+#             logger.info(f"Client {request.sid} left room: {room}")
         
-        emit('left_rooms', {'rooms': rooms, 'message': 'Left update rooms'})
+#         emit('left_rooms', {'rooms': rooms, 'message': 'Left update rooms'})
         
-    except Exception as e:
-        logger.error(f"Error leaving rooms: {e}")
-        emit('error', {'message': 'Failed to leave update rooms'})
+#     except Exception as e:
+#         logger.error(f"Error leaving rooms: {e}")
+#         emit('error', {'message': 'Failed to leave update rooms'})
 
 def broadcast_status_update(work_order_data, old_status, new_status, updated_by):
     """Broadcast work order status updates to connected clients"""
@@ -1603,13 +1603,14 @@ def broadcast_status_update(work_order_data, old_status, new_status, updated_by)
         }
         
         # Broadcast to different rooms
-        socketio.emit('work_order_updated', update_data, room='general')
-        socketio.emit('work_order_updated', update_data, room='timeline')
-        socketio.emit('work_order_updated', update_data, room='mobile')
+        # socketio.emit('work_order_updated', update_data, room='general')
+        # socketio.emit('work_order_updated', update_data, room='timeline')
+        # socketio.emit('work_order_updated', update_data, room='mobile')
         
         # Send to floor display if it's for a specific line
         if work_order_data.get('line_number'):
-            socketio.emit('work_order_updated', update_data, room=f"line_{work_order_data['line_number']}")
+            # socketio.emit('work_order_updated', update_data, room=f"line_{work_order_data['line_number']}")
+            pass # Temporarily disabled
         
         logger.info(f"Broadcasted status update: {work_order_data.get('work_order_number')} {old_status} → {new_status}")
         
@@ -1625,7 +1626,7 @@ def broadcast_general_update(event_type, data):
             'timestamp': datetime.now().isoformat()
         }
         
-        socketio.emit('general_update', update_data, room='general')
+        # socketio.emit('general_update', update_data, room='general')
         logger.info(f"Broadcasted general update: {event_type}")
         
     except Exception as e:
@@ -1649,5 +1650,7 @@ if __name__ == '__main__':
     else:
         logger.info("Auto-initialization disabled, skipping database setup")
     
+    # Use regular Flask app.run for now - SocketIO temporarily disabled for deployment
+    app.run(host='0.0.0.0', port=port, debug=debug)
     # Use socketio.run instead of app.run for WebSocket support
-    socketio.run(app, host='0.0.0.0', port=port, debug=debug) 
+    # socketio.run(app, host='0.0.0.0', port=port, debug=debug) 
