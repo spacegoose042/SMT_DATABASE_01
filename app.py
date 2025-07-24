@@ -1400,6 +1400,127 @@ def mobile_get_valid_statuses():
         'timestamp': datetime.now().isoformat()
     }), 200
 
+@app.route('/api/timeline/work-orders/<work_order_id>/status', methods=['PUT'])
+@require_auth(['admin', 'scheduler', 'supervisor'])
+def timeline_update_work_order_status(work_order_id):
+    """Update work order status from Timeline View"""
+    try:
+        data = request.get_json()
+        if not data or not data.get('status'):
+            return jsonify({'error': 'Status is required'}), 400
+        
+        new_status = data['status'].strip()
+        updated_by = request.current_user['username']
+        
+        # Validate status - use same validation as mobile endpoint
+        valid_statuses = [
+            '1st Side Ready', 'Ready', 'Ready*', 'In Progress', 
+            'Setup', 'Running', 'Completed', 'On Hold', 'Issues',
+            'Missing TSM-125-01-L-DV', 'Quality Check', 'Cancelled'
+        ]
+        
+        if new_status not in valid_statuses:
+            return jsonify({
+                'error': f'Invalid status. Valid options: {", ".join(valid_statuses)}'
+            }), 400
+        
+        connection = get_database_connection()
+        if not connection:
+            return jsonify({'error': 'Database connection failed'}), 500
+        
+        try:
+            cursor = connection.cursor()
+            
+            # Get current work order details
+            cursor.execute("""
+                SELECT wo.work_order_number, wo.status, c.name, a.assembly_number, wo.line_number
+                FROM work_orders wo
+                JOIN assemblies a ON wo.assembly_id = a.id
+                JOIN customers c ON a.customer_id = c.id
+                WHERE wo.id = %s
+            """, (work_order_id,))
+            
+            work_order = cursor.fetchone()
+            if not work_order:
+                cursor.close()
+                connection.close()
+                return jsonify({'error': 'Work order not found'}), 404
+            
+            old_status = work_order[1]
+            
+            # Don't update if status is the same
+            if old_status == new_status:
+                cursor.close()
+                connection.close()
+                return jsonify({
+                    'message': 'Status unchanged',
+                    'work_order_number': work_order[0],
+                    'status': new_status,
+                    'timestamp': datetime.now().isoformat()
+                }), 200
+            
+            # Update work order status
+            cursor.execute("""
+                UPDATE work_orders 
+                SET status = %s, updated_at = NOW()
+                WHERE id = %s
+            """, (new_status, work_order_id))
+            
+            # Create status history record
+            cursor.execute("""
+                INSERT INTO work_order_status_history 
+                (work_order_id, old_status, new_status, changed_by, notes, changed_at)
+                VALUES (%s, %s, %s, %s, %s, NOW())
+            """, (work_order_id, old_status, new_status, updated_by, 'Updated from Timeline View'))
+            
+            connection.commit()
+            cursor.close()
+            connection.close()
+            
+            # Prepare work order data for broadcast
+            work_order_broadcast_data = {
+                'id': work_order_id,
+                'work_order_number': work_order[0],
+                'qr_code': f"{work_order[0]}-{work_order[4]}" if work_order[4] else None,
+                'customer_name': work_order[2],
+                'assembly_number': work_order[3],
+                'line_name': None,  # We could fetch this if needed
+                'line_number': work_order[4],
+                'quantity': None,  # We could fetch this if needed
+                'trolley_number': None  # We could fetch this if needed
+            }
+            
+            # Broadcast the status update to connected clients
+            broadcast_status_update(work_order_broadcast_data, old_status, new_status, updated_by)
+            
+            return jsonify({
+                'message': 'Status updated successfully',
+                'work_order_number': work_order[0],
+                'old_status': old_status,
+                'new_status': new_status,
+                'updated_by': updated_by,
+                'broadcast': 'sent',
+                'timestamp': datetime.now().isoformat()
+            }), 200
+            
+        except Exception as db_error:
+            logger.error(f"Database error in timeline status update: {db_error}")
+            if connection:
+                connection.rollback()
+                connection.close()
+            return jsonify({
+                'error': f'Database operation failed: {str(db_error)}',
+                'timestamp': datetime.now().isoformat()
+            }), 500
+        
+    except Exception as e:
+        logger.error(f"Timeline status update error: {e}")
+        return jsonify({
+            'error': 'Status update failed',
+            'details': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
 @app.route('/api/mobile/qr/<qr_code>')
 @require_auth(['admin', 'scheduler', 'supervisor', 'floor_view'])
 def mobile_qr_lookup(qr_code):

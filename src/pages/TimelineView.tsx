@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Clock, Users, AlertTriangle } from 'lucide-react';
 import { useSocket } from '../contexts/SocketContext.tsx';
+import { useAuth } from '../contexts/AuthContext.tsx';
+import StatusDropdown from '../components/StatusDropdown.tsx';
 
 interface WorkOrder {
   id: string;
@@ -40,7 +42,9 @@ const TimelineView: React.FC = () => {
   const [lastUpdated, setLastUpdated] = useState<string>('');
   const [selectedWorkOrder, setSelectedWorkOrder] = useState<string | null>(null);
   const [userInteractions, setUserInteractions] = useState<Map<string, any>>(new Map());
+  const [statusUpdateError, setStatusUpdateError] = useState<string | null>(null);
   
+  const { user } = useAuth();
   const { 
     connected, 
     socketConnected, 
@@ -173,27 +177,7 @@ const TimelineView: React.FC = () => {
       const timelineData = await timelineResponse.json();
       const linesData = await linesResponse.json();
 
-      const workOrdersData = timelineData.work_orders || [];
-      
-      // 🐛 DEBUG: Check for duplicate or missing IDs
-      console.group('🔍 WORK ORDER ID ANALYSIS');
-      const idCounts: { [key: string]: number } = {};
-      const nullIds: { index: number; workOrder: string }[] = [];
-      
-      workOrdersData.forEach((wo, index) => {
-        if (!wo.id || wo.id === null || wo.id === undefined) {
-          nullIds.push({ index, workOrder: wo.work_order_number });
-        } else {
-          idCounts[wo.id] = (idCounts[wo.id] || 0) + 1;
-        }
-      });
-      
-      console.log('📊 Work Orders with NULL/undefined IDs:', nullIds);
-      console.log('📊 ID frequency count:', idCounts);
-      console.log('📊 Duplicate IDs found:', Object.entries(idCounts).filter(([id, count]) => (count as number) > 1));
-      console.groupEnd();
-
-      setWorkOrders(workOrdersData);
+      setWorkOrders(timelineData.work_orders || []);
       setProductionLines(linesData.production_lines || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
@@ -255,9 +239,6 @@ const TimelineView: React.FC = () => {
 
   // Handle work order selection
   const handleWorkOrderSelect = (workOrderId: string, workOrderNumber: string) => {
-    console.log('🎯 Selecting work order:', { workOrderId, workOrderNumber });
-    console.log('📋 All work orders IDs:', workOrders.map(wo => ({ id: wo.id, number: wo.work_order_number })));
-    
     setSelectedWorkOrder(workOrderId);
     
     // Broadcast selection to other users
@@ -267,6 +248,51 @@ const TimelineView: React.FC = () => {
     setTimeout(() => {
       setSelectedWorkOrder(null);
     }, 3000);
+  };
+
+  // Handle status change from dropdown
+  const handleStatusChange = async (workOrderId: string, newStatus: string) => {
+    try {
+      setStatusUpdateError(null);
+      
+      const baseUrl = process.env.NODE_ENV === 'production' 
+        ? window.location.origin 
+        : 'https://smtdatabase01-production.up.railway.app';
+      
+      const response = await fetch(`${baseUrl}/api/timeline/work-orders/${workOrderId}/status`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({ status: newStatus })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to update status');
+      }
+
+      const result = await response.json();
+      
+      // Update local state immediately for better UX
+      setWorkOrders(prevOrders => 
+        prevOrders.map(wo => 
+          wo.id === workOrderId 
+            ? { ...wo, status: newStatus }
+            : wo
+        )
+      );
+
+      // Clear any previous error
+      setStatusUpdateError(null);
+      
+      console.log('Status updated successfully:', result);
+
+    } catch (error) {
+      console.error('Failed to update status:', error);
+      setStatusUpdateError(error instanceof Error ? error.message : 'Failed to update status');
+    }
   };
 
   if (loading) {
@@ -371,6 +397,29 @@ const TimelineView: React.FC = () => {
                 </div>
               </div>
             </div>
+            
+            {/* Status Update Error */}
+            {statusUpdateError && (
+              <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-md">
+                <div className="flex">
+                  <AlertTriangle className="h-5 w-5 text-red-400" />
+                  <div className="ml-3">
+                    <h3 className="text-sm font-medium text-red-800">
+                      Status Update Failed
+                    </h3>
+                    <p className="text-sm text-red-700 mt-1">
+                      {statusUpdateError}
+                    </p>
+                    <button
+                      onClick={() => setStatusUpdateError(null)}
+                      className="text-sm text-red-600 hover:text-red-500 mt-2 underline"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="p-6">
@@ -460,9 +509,18 @@ const TimelineView: React.FC = () => {
                         
                         {/* Status */}
                         <div className="col-span-2">
-                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(wo.status)}`}>
-                            {wo.status}
-                          </span>
+                          {user && ['admin', 'scheduler', 'supervisor'].includes(user.role) ? (
+                            <StatusDropdown
+                              currentStatus={wo.status}
+                              workOrderId={wo.id}
+                              workOrderNumber={wo.work_order_number}
+                              onStatusChange={handleStatusChange}
+                            />
+                          ) : (
+                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(wo.status)}`}>
+                              {wo.status}
+                            </span>
+                          )}
                         </div>
 
                         {/* Quantity */}
