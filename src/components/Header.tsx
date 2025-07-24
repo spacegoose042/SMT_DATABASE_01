@@ -10,42 +10,53 @@ interface HeaderProps {
 
 function Header({ onMenuClick }: HeaderProps) {
   const { user, logout } = useAuth();
-  const { connected } = useSocket();
+  const { connected, socketConnected } = useSocket();
 
   return (
-    <div className="bg-white shadow">
+    <header className="bg-white shadow-sm border-b border-gray-200">
       <div className="px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between h-16">
-          <div className="flex items-center">
+        <div className="flex justify-between items-center h-16">
+          {/* Left side */}
+          <div className="flex items-center space-x-4">
             <button
-              type="button"
-              className="lg:hidden -ml-0.5 -mt-0.5 h-12 w-12 inline-flex items-center justify-center rounded-md text-sy-black-500 hover:text-sy-black-900 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-sy-green-500"
               onClick={onMenuClick}
+              className="p-2 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100"
             >
-              <span className="sr-only">Open sidebar</span>
-              <Bars3Icon className="h-6 w-6" aria-hidden="true" />
+              <Bars3Icon className="h-6 w-6" />
             </button>
-            <div className="lg:flex lg:items-center lg:space-x-6">
-              <h1 className="text-2xl font-semibold text-sy-black-900">SMT Production Database</h1>
+            
+            <div className="flex items-center space-x-3">
+              <h1 className="text-xl font-semibold text-gray-900">
+                SMT Production Database
+              </h1>
+              
+              {/* Connection Status */}
+              <div className="flex items-center space-x-2">
+                {/* SSE Status */}
+                <div className="flex items-center space-x-1">
+                  {connected ? (
+                    <CheckCircleIcon className="h-4 w-4 text-green-500" />
+                  ) : (
+                    <XCircleIcon className="h-4 w-4 text-red-500" />
+                  )}
+                  <span className="text-xs text-gray-600">SSE</span>
+                </div>
+                
+                {/* Socket.IO Status */}
+                <div className="flex items-center space-x-1">
+                  {socketConnected ? (
+                    <CheckCircleIcon className="h-4 w-4 text-blue-500" />
+                  ) : (
+                    <XCircleIcon className="h-4 w-4 text-red-500" />
+                  )}
+                  <span className="text-xs text-gray-600">Socket</span>
+                </div>
+              </div>
             </div>
           </div>
           
+          {/* Right side */}
           <div className="flex items-center space-x-4">
-            {/* Real-time Status Indicator */}
-            <div className="flex items-center space-x-2">
-              {connected ? (
-                <>
-                  <CheckCircleIcon className="h-5 w-5 text-green-500" />
-                  <span className="text-sm text-sy-black-600 hidden sm:inline">Live</span>
-                </>
-              ) : (
-                <>
-                  <XCircleIcon className="h-5 w-5 text-red-500" />
-                  <span className="text-sm text-sy-black-600 hidden sm:inline">Offline</span>
-                </>
-              )}
-            </div>
-            
             {/* User Menu */}
             <div className="flex items-center space-x-3">
               <div className="flex items-center space-x-2">
@@ -65,7 +76,7 @@ function Header({ onMenuClick }: HeaderProps) {
           </div>
         </div>
       </div>
-    </div>
+    </header>
   );
 }
 

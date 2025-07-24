@@ -11,6 +11,7 @@ import jwt
 import bcrypt
 from functools import wraps
 from flask import Flask, jsonify, request, Response
+from flask_socketio import SocketIO, emit, join_room, leave_room
 from datetime import datetime, timedelta
 from flask_cors import CORS
 import json
@@ -28,6 +29,9 @@ app = Flask(__name__)
 CORS(app, resources={
     r"/api/*": {"origins": "*"}
 })
+
+# Initialize Socket.IO with CORS support
+socketio = SocketIO(app, cors_allowed_origins="*", logger=True, engineio_logger=True)
 
 # Global queue for real-time updates
 update_queue = Queue()
@@ -1587,10 +1591,10 @@ def stream_events():
     return response
 
 def broadcast_status_update(work_order_data, old_status, new_status, updated_by):
-    """Broadcast work order status updates via SSE"""
+    """Broadcast work order status updates via both SSE and Socket.IO"""
     try:
         update_data = {
-            'type': 'status_update',
+            'type': 'work_order_update',  # Changed to match SSE context expectations
             'work_order': {
                 'id': work_order_data.get('id'),
                 'work_order_number': work_order_data.get('work_order_number'),
@@ -1612,13 +1616,51 @@ def broadcast_status_update(work_order_data, old_status, new_status, updated_by)
             'timestamp': datetime.now().isoformat()
         }
         
-        # Add to queue for SSE clients
+        # Broadcast via SSE (existing functionality)
         update_queue.put(update_data)
         
-        logger.info(f"Broadcasted SSE update: {work_order_data.get('work_order_number')} {old_status} → {new_status}")
+        # Broadcast via Socket.IO to all rooms
+        socketio.emit('work_order_update', update_data, room='timeline')
+        socketio.emit('work_order_update', update_data, room='floor_display')
+        
+        logger.info(f"Broadcasted update via SSE + Socket.IO: {work_order_data.get('work_order_number')} {old_status} → {new_status}")
         
     except Exception as e:
-        logger.error(f"Error broadcasting SSE update: {e}")
+        logger.error(f"Error broadcasting status update: {e}")
+
+# Socket.IO Event Handlers
+@socketio.on('connect')
+def handle_connect():
+    """Handle client connection"""
+    logger.info(f"Client connected: {request.sid}")
+    emit('connected', {'message': 'Connected to Socket.IO server', 'sid': request.sid})
+
+@socketio.on('disconnect') 
+def handle_disconnect():
+    """Handle client disconnection"""
+    logger.info(f"Client disconnected: {request.sid}")
+
+@socketio.on('join_room')
+def handle_join_room(data):
+    """Handle client joining a room"""
+    room = data.get('room')
+    if room in ['timeline', 'floor_display']:
+        join_room(room)
+        logger.info(f"Client {request.sid} joined room: {room}")
+        emit('room_joined', {'room': room, 'message': f'Joined {room} room'})
+    else:
+        emit('error', {'message': f'Invalid room: {room}'})
+
+@socketio.on('leave_room')
+def handle_leave_room(data):
+    """Handle client leaving a room"""
+    room = data.get('room')
+    if room in ['timeline', 'floor_display']:
+        leave_room(room)
+        logger.info(f"Client {request.sid} left room: {room}")
+        emit('room_left', {'room': room, 'message': f'Left {room} room'})
+    else:
+        emit('error', {'message': f'Invalid room: {room}'})
 
 # SSE Health check endpoint
 @app.route('/api/sse/health')
@@ -1649,6 +1691,6 @@ if __name__ == '__main__':
     else:
         logger.info("Auto-initialization disabled, skipping database setup")
     
-    # Use regular Flask app.run for SSE implementation
-    logger.info("Starting SMT Production Database v2.4-SSE with Server-Sent Events")
-    app.run(host='0.0.0.0', port=port, debug=debug) 
+    # Use Socket.IO runner for real-time features alongside SSE
+    logger.info("Starting SMT Production Database v2.5-Hybrid with SSE + Socket.IO")
+    socketio.run(app, host='0.0.0.0', port=port, debug=debug, allow_unsafe_werkzeug=True) 

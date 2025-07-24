@@ -1,8 +1,9 @@
 import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
 import { useAuth } from './AuthContext.tsx';
+import { io, Socket } from 'socket.io-client';
 
 interface WorkOrderUpdate {
-  type: 'status_update';
+  type: 'work_order_update';
   work_order: {
     id: string;
     work_order_number: string;
@@ -32,21 +33,26 @@ interface GeneralUpdate {
 
 interface SSEContextType {
   connected: boolean;
+  socketConnected: boolean;
   onWorkOrderUpdate: (callback: (update: WorkOrderUpdate) => void) => () => void;
-  onGeneralUpdate: (callback: (update: GeneralUpdate) => void) => () => void;
+  onGeneralUpdate: (callback: (data: any) => void) => () => void;
+  joinRooms: (rooms: string[]) => void;
 }
 
 const SSEContext = createContext<SSEContextType | undefined>(undefined);
 
 export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [connected, setConnected] = useState(false);
+  const [connected, setConnected] = useState(false); // SSE connection
+  const [socketConnected, setSocketConnected] = useState(false); // Socket.IO connection
   const [eventSource, setEventSource] = useState<EventSource | null>(null);
+  const [socket, setSocket] = useState<Socket | null>(null);
   const { user } = useAuth();
   
-  // Use refs to store callbacks to avoid recreating SSE connection
+  // Use refs to store callbacks to avoid recreating connections
   const workOrderCallbacksRef = useRef<((update: WorkOrderUpdate) => void)[]>([]);
   const generalCallbacksRef = useRef<((data: any) => void)[]>([]);
 
+  // SSE Connection Setup
   useEffect(() => {
     const token = localStorage.getItem('auth_token');
     if (!token) {
@@ -117,6 +123,69 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     };
   }, [user]); // Depend on user to reconnect when auth changes
 
+  // Socket.IO Connection Setup
+  useEffect(() => {
+    const token = localStorage.getItem('auth_token');
+    if (!token) {
+      console.log('❌ No auth token available for Socket.IO');
+      return;
+    }
+
+    const isDev = process.env.NODE_ENV === 'development';
+    const baseUrl = isDev 
+      ? 'https://smtdatabase01-production.up.railway.app'
+      : window.location.origin;
+
+    console.log('🔌 Connecting to Socket.IO server:', baseUrl);
+
+    // Create Socket.IO connection with auth
+    const newSocket = io(baseUrl, {
+      auth: {
+        token: token
+      }
+    });
+
+    newSocket.on('connect', () => {
+      console.log('✅ Connected to Socket.IO server');
+      setSocketConnected(true);
+    });
+
+    newSocket.on('disconnect', () => {
+      console.log('❌ Disconnected from Socket.IO server');
+      setSocketConnected(false);
+    });
+
+    newSocket.on('connected', (data) => {
+      console.log('🔗 Socket.IO handshake:', data);
+    });
+
+    newSocket.on('work_order_update', (data) => {
+      console.log('🚀 Received Socket.IO work order update:', data);
+      
+      // Route to work order callbacks (same as SSE)
+      workOrderCallbacksRef.current.forEach(callback => {
+        try {
+          callback(data);
+        } catch (error) {
+          console.error('Error in Socket.IO work order callback:', error);
+        }
+      });
+    });
+
+    newSocket.on('error', (error) => {
+      console.error('❌ Socket.IO error:', error);
+    });
+
+    setSocket(newSocket);
+
+    // Cleanup on unmount
+    return () => {
+      console.log('🔌 Closing Socket.IO connection');
+      newSocket.disconnect();
+      setSocketConnected(false);
+    };
+  }, [user]);
+
   const onWorkOrderUpdate = (callback: (update: WorkOrderUpdate) => void) => {
     workOrderCallbacksRef.current.push(callback);
     
@@ -135,23 +204,34 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     };
   };
 
-  const contextValue: SSEContextType = {
-    connected,
-    onWorkOrderUpdate,
-    onGeneralUpdate
+  const joinRooms = (rooms: string[]) => {
+    if (socket && socketConnected) {
+      rooms.forEach(room => {
+        console.log(`🏠 Joining Socket.IO room: ${room}`);
+        socket.emit('join_room', { room });
+      });
+    } else {
+      console.log('⚠️ Socket.IO not connected, cannot join rooms');
+    }
   };
 
   return (
-    <SSEContext.Provider value={contextValue}>
+    <SSEContext.Provider value={{
+      connected,
+      socketConnected,
+      onWorkOrderUpdate,
+      onGeneralUpdate,
+      joinRooms
+    }}>
       {children}
     </SSEContext.Provider>
   );
-}
+};
 
-export function useSocket() {
+export const useSocket = () => {
   const context = useContext(SSEContext);
   if (context === undefined) {
     throw new Error('useSocket must be used within a SocketProvider');
   }
   return context;
-} 
+}; 

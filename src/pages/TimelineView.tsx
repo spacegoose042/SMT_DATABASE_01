@@ -38,12 +38,16 @@ const TimelineView: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [selectedWeeks, setSelectedWeeks] = useState(4);
   const [lastUpdated, setLastUpdated] = useState<string>('');
-  const { connected, onWorkOrderUpdate } = useSocket();
+  const { connected, socketConnected, onWorkOrderUpdate, joinRooms } = useSocket();
 
-  // SSE automatically connects - no need for room management like Socket.IO
-  // Real-time updates are handled automatically
+  // Join Socket.IO room for real-time timeline updates
+  useEffect(() => {
+    if (socketConnected) {
+      joinRooms(['timeline']);
+    }
+  }, [socketConnected, joinRooms]);
 
-  // Listen for real-time work order updates
+  // Listen for real-time work order updates (from both SSE and Socket.IO)
   useEffect(() => {
     const cleanup = onWorkOrderUpdate((update) => {
       console.log('📡 Received work order update:', update);
