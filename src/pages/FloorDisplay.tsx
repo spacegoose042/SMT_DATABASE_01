@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { Clock, Package, User, Calendar, AlertCircle } from 'lucide-react';
+import { Clock, Package, User, Calendar, AlertCircle, Wifi, WifiOff } from 'lucide-react';
+import { useSocket } from '../contexts/SocketContext.tsx';
 
 interface Job {
   id: string;
@@ -40,14 +41,53 @@ const FloorDisplay: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
+  
+  // Socket.IO integration for real-time updates
+  const { 
+    connected: sseConnected, 
+    socketConnected, 
+    joinRooms, 
+    onWorkOrderUpdate,
+    userCount 
+  } = useSocket();
 
   useEffect(() => {
     if (lineId) {
       fetchLineSchedule();
-      const interval = setInterval(fetchLineSchedule, 300000); // Refresh every 5 minutes
+      
+      // Join the floor_display room for real-time updates
+      if (socketConnected) {
+        joinRooms(['floor_display']);
+      }
+      
+      // Periodic refresh as backup (every 5 minutes)
+      const interval = setInterval(fetchLineSchedule, 300000);
       return () => clearInterval(interval);
     }
-  }, [lineId]);
+  }, [lineId, socketConnected, joinRooms]);
+
+  // Real-time update handler
+  useEffect(() => {
+    const unsubscribe = onWorkOrderUpdate((update) => {
+      console.log('📺 Floor Display received real-time update:', update);
+      
+      // If the update affects our line, refresh the data
+      const updateLineNumber = update.work_order?.line_number?.toString();
+      if (updateLineNumber === lineId || !updateLineNumber) {
+        fetchLineSchedule();
+      }
+    });
+
+    return unsubscribe;
+  }, [onWorkOrderUpdate, lineId]);
+
+  // Socket.IO room joining effect
+  useEffect(() => {
+    if (socketConnected) {
+      console.log('🏠 Floor Display joining room: floor_display');
+      joinRooms(['floor_display']);
+    }
+  }, [socketConnected, joinRooms]);
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -154,17 +194,48 @@ const FloorDisplay: React.FC = () => {
         <div className="max-w-7xl mx-auto px-8 py-6">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-6">
-              <h1 className="text-4xl font-bold text-sy-green-400">
+              <h1 className="text-5xl font-bold text-sy-green-400">
                 {scheduleData.line_info.line_name}
               </h1>
               {scheduleData.line_info.time_multiplier !== 1 && (
-                <span className="bg-sy-gold-500 text-sy-black-900 px-4 py-2 rounded-full text-lg font-semibold">
+                <span className="bg-sy-gold-500 text-sy-black-900 px-4 py-2 rounded-full text-xl font-semibold">
                   {scheduleData.line_info.time_multiplier}x Time
                 </span>
               )}
+              
+              {/* Real-time Connection Status */}
+              <div className="flex items-center space-x-4 ml-8">
+                <div className="flex items-center space-x-2">
+                  {sseConnected ? (
+                    <Wifi className="h-6 w-6 text-sy-green-400" />
+                  ) : (
+                    <WifiOff className="h-6 w-6 text-red-400" />
+                  )}
+                  <span className={`text-sm font-medium ${sseConnected ? 'text-sy-green-400' : 'text-red-400'}`}>
+                    SSE
+                  </span>
+                </div>
+                
+                <div className="flex items-center space-x-2">
+                  <div className={`w-3 h-3 rounded-full ${socketConnected ? 'bg-blue-400' : 'bg-gray-500'}`}></div>
+                  <span className={`text-sm font-medium ${socketConnected ? 'text-blue-400' : 'text-gray-400'}`}>
+                    Socket
+                  </span>
+                </div>
+                
+                {socketConnected && userCount > 0 && (
+                  <div className="flex items-center space-x-2">
+                    <User className="h-5 w-5 text-sy-gold-400" />
+                    <span className="text-sy-gold-400 text-sm font-medium">
+                      {userCount}
+                    </span>
+                  </div>
+                )}
+              </div>
             </div>
+            
             <div className="text-right">
-              <div className="text-3xl font-mono text-sy-green-400">
+              <div className="text-4xl font-mono text-sy-green-400 font-bold">
                 {currentTime.toLocaleTimeString('en-US', { 
                   hour: 'numeric', 
                   minute: '2-digit',
@@ -172,7 +243,7 @@ const FloorDisplay: React.FC = () => {
                   hour12: true 
                 })}
               </div>
-              <div className="text-lg text-gray-300">
+              <div className="text-xl text-gray-300">
                 {currentTime.toLocaleDateString('en-US', { 
                   weekday: 'long',
                   month: 'long', 
@@ -189,44 +260,44 @@ const FloorDisplay: React.FC = () => {
         {/* Current Job */}
         {currentJob ? (
           <div className="mb-12">
-            <h2 className="text-3xl font-bold text-sy-green-400 mb-6 flex items-center">
-              <Package className="h-8 w-8 mr-3" />
+            <h2 className="text-4xl font-bold text-sy-green-400 mb-8 flex items-center">
+              <Package className="h-10 w-10 mr-4" />
               CURRENT JOB
             </h2>
             
-            <div className="bg-sy-black-800 rounded-xl p-8 border-2 border-sy-green-500">
-              <div className="grid grid-cols-3 gap-8">
+            <div className="bg-sy-black-800 rounded-2xl p-10 border-4 border-sy-green-500 shadow-2xl">
+              <div className="grid grid-cols-3 gap-10">
                 <div>
-                  <h3 className="text-2xl font-bold text-white mb-2">
+                  <h3 className="text-3xl font-bold text-white mb-3">
                     WO {currentJob.work_order_number}
                   </h3>
-                  <p className="text-xl text-sy-green-300 mb-4">
+                  <p className="text-2xl text-sy-green-300 mb-6">
                     {currentJob.customer_name}
                   </p>
-                  <p className="text-lg text-gray-300">
+                  <p className="text-xl text-gray-300">
                     {currentJob.assembly_number} Rev {currentJob.revision}
                   </p>
                 </div>
 
                 <div className="text-center">
-                  <div className="mb-4">
-                    <span className={`inline-flex items-center px-4 py-2 rounded-full text-lg font-semibold ${getStatusColor(currentJob.status)}`}>
+                  <div className="mb-6">
+                    <span className={`inline-flex items-center px-6 py-3 rounded-full text-xl font-bold ${getStatusColor(currentJob.status)} shadow-lg`}>
                       {currentJob.status}
                     </span>
                   </div>
-                  <p className="text-3xl font-bold text-white">
+                  <p className="text-5xl font-bold text-white mb-2">
                     {currentJob.quantity.toLocaleString()}
                   </p>
-                  <p className="text-lg text-gray-300">Units</p>
+                  <p className="text-xl text-gray-300">Units</p>
                 </div>
 
                 <div className="text-right">
-                  <p className="text-lg text-gray-300 mb-2">Estimated Duration</p>
-                  <p className="text-3xl font-bold text-sy-gold-400">
+                  <p className="text-xl text-gray-300 mb-3">Estimated Duration</p>
+                  <p className="text-5xl font-bold text-sy-gold-400 mb-4">
                     {formatDuration(currentJob.total_duration_hours)}
                   </p>
                   {currentJob.ship_date && (
-                    <p className="text-lg text-gray-300 mt-4">
+                    <p className="text-xl text-gray-300">
                       Ship: {formatDate(currentJob.ship_date)}
                     </p>
                   )}
@@ -234,8 +305,8 @@ const FloorDisplay: React.FC = () => {
               </div>
 
               {currentJob.trolley_number && (
-                <div className="mt-6 pt-6 border-t border-gray-600">
-                  <p className="text-xl text-sy-gold-400">
+                <div className="mt-8 pt-8 border-t border-gray-600">
+                  <p className="text-2xl text-sy-gold-400">
                     <span className="text-gray-300">Trolley:</span> #{currentJob.trolley_number}
                   </p>
                 </div>
@@ -244,59 +315,61 @@ const FloorDisplay: React.FC = () => {
           </div>
         ) : (
           <div className="mb-12">
-            <h2 className="text-3xl font-bold text-sy-green-400 mb-6 flex items-center">
-              <Package className="h-8 w-8 mr-3" />
+            <h2 className="text-4xl font-bold text-sy-green-400 mb-8 flex items-center">
+              <Package className="h-10 w-10 mr-4" />
               CURRENT JOB
             </h2>
-            <div className="bg-sy-black-800 rounded-xl p-12 border-2 border-gray-600 text-center">
-              <p className="text-2xl text-gray-400">No job currently assigned</p>
+            <div className="bg-sy-black-800 rounded-2xl p-16 border-4 border-gray-600 text-center">
+              <Package className="h-20 w-20 text-gray-400 mx-auto mb-6" />
+              <p className="text-3xl text-gray-400 font-medium">No job currently assigned</p>
+              <p className="text-xl text-gray-500 mt-4">Waiting for next work order...</p>
             </div>
           </div>
         )}
 
         {/* Next Jobs */}
         <div>
-          <h2 className="text-3xl font-bold text-sy-green-400 mb-6 flex items-center">
-            <Clock className="h-8 w-8 mr-3" />
+          <h2 className="text-4xl font-bold text-sy-green-400 mb-8 flex items-center">
+            <Clock className="h-10 w-10 mr-4" />
             COMING UP
           </h2>
           
           {nextJobs.length > 0 ? (
-            <div className="space-y-6">
+            <div className="space-y-8">
               {nextJobs.map((job, index) => (
-                <div key={job.id} className="bg-sy-black-800 rounded-xl p-6 border border-gray-600">
-                  <div className="grid grid-cols-4 gap-6 items-center">
+                <div key={job.id} className="bg-sy-black-800 rounded-2xl p-8 border-2 border-gray-600 hover:border-sy-green-400 transition-colors shadow-lg">
+                  <div className="grid grid-cols-4 gap-8 items-center">
                     <div>
-                      <h4 className="text-xl font-bold text-white mb-1">
+                      <h4 className="text-2xl font-bold text-white mb-2">
                         WO {job.work_order_number}
                       </h4>
-                      <p className="text-lg text-sy-green-300">
+                      <p className="text-xl text-sy-green-300 mb-2">
                         {job.customer_name}
                       </p>
-                      <p className="text-gray-300">
+                      <p className="text-lg text-gray-300">
                         {job.assembly_number}
                       </p>
                     </div>
 
                     <div className="text-center">
-                      <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(job.status)}`}>
+                      <span className={`inline-flex items-center px-4 py-2 rounded-full text-lg font-medium ${getStatusColor(job.status)} shadow-md`}>
                         {job.status}
                       </span>
                     </div>
 
                     <div className="text-center">
-                      <p className="text-xl font-bold text-white">
+                      <p className="text-3xl font-bold text-white mb-1">
                         {job.quantity.toLocaleString()}
                       </p>
-                      <p className="text-gray-300">Units</p>
+                      <p className="text-lg text-gray-300">Units</p>
                     </div>
 
                     <div className="text-right">
-                      <p className="text-xl font-bold text-sy-gold-400">
+                      <p className="text-3xl font-bold text-sy-gold-400 mb-2">
                         {formatDuration(job.total_duration_hours)}
                       </p>
                       {job.scheduled_start_time && (
-                        <p className="text-gray-300">
+                        <p className="text-lg text-gray-300">
                           Start: {formatTime(job.scheduled_start_time)}
                         </p>
                       )}
@@ -306,8 +379,10 @@ const FloorDisplay: React.FC = () => {
               ))}
             </div>
           ) : (
-            <div className="bg-sy-black-800 rounded-xl p-12 border border-gray-600 text-center">
-              <p className="text-xl text-gray-400">No upcoming jobs scheduled</p>
+            <div className="bg-sy-black-800 rounded-2xl p-16 border-2 border-gray-600 text-center">
+              <Clock className="h-16 w-16 text-gray-400 mx-auto mb-6" />
+              <p className="text-2xl text-gray-400 font-medium">No upcoming jobs scheduled</p>
+              <p className="text-lg text-gray-500 mt-4">Schedule will update automatically</p>
             </div>
           )}
         </div>
@@ -319,10 +394,24 @@ const FloorDisplay: React.FC = () => {
           <div className="flex items-center space-x-6 text-gray-300">
             <span>Last updated: {new Date().toLocaleTimeString()}</span>
             <span>•</span>
-            <span>Updates every 5 minutes</span>
+            {(sseConnected || socketConnected) ? (
+              <span className="text-sy-green-400 font-medium">Real-time updates active</span>
+            ) : (
+              <span className="text-yellow-400">Auto-refresh every 5 minutes</span>
+            )}
+            <span>•</span>
+            <span>Line {lineId}</span>
           </div>
-          <div className="text-gray-300">
-            S&Y Industries Production System
+          <div className="flex items-center space-x-4">
+            <div className="text-gray-300">
+              SMT Production Database
+            </div>
+            {(sseConnected || socketConnected) && (
+              <div className="flex items-center space-x-1">
+                <div className="w-2 h-2 bg-sy-green-400 rounded-full animate-pulse"></div>
+                <span className="text-sy-green-400 text-sm">LIVE</span>
+              </div>
+            )}
           </div>
         </div>
       </div>
