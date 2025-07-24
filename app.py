@@ -13,7 +13,7 @@ from functools import wraps
 from flask import Flask, jsonify, request, send_from_directory
 from datetime import datetime, timedelta
 from flask_cors import CORS
-# from flask_socketio import SocketIO, emit, join_room, leave_room
+from flask_socketio import SocketIO, emit
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -22,8 +22,8 @@ logger = logging.getLogger(__name__)
 # API-only Flask app - React runs locally
 app = Flask(__name__)
 
-# Configure Flask-SocketIO with CORS support - TEMPORARILY DISABLED
-# socketio = SocketIO(app, cors_allowed_origins="*", logger=True, engineio_logger=True)
+# Configure Flask-SocketIO with minimal setup for Phase 1
+socketio = SocketIO(app, cors_allowed_origins="*", logger=False, engineio_logger=False)
 
 # JWT configuration
 app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'smt-production-database-secret-key-change-in-production')
@@ -1632,6 +1632,32 @@ def broadcast_general_update(event_type, data):
     except Exception as e:
         logger.error(f"Error broadcasting general update: {e}")
 
+# PHASE 1: Minimal SocketIO Event Handlers
+@socketio.on('connect')
+def handle_connect():
+    """Handle client connection - Phase 1 minimal setup"""
+    logger.info(f"SocketIO client connected: {request.sid}")
+    emit('connected', {
+        'message': 'Connected to SMT Database - Phase 1',
+        'version': '2.4-phase1',
+        'timestamp': datetime.now().isoformat()
+    })
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    """Handle client disconnection"""
+    logger.info(f"SocketIO client disconnected: {request.sid}")
+
+# Health check endpoint for SocketIO
+@app.route('/api/socketio/health')
+def socketio_health():
+    """Check if SocketIO is working"""
+    return jsonify({
+        'socketio_status': 'active',
+        'version': '2.4-phase1',
+        'timestamp': datetime.now().isoformat()
+    })
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
     debug = os.environ.get('DEBUG', 'false').lower() == 'true'
@@ -1650,7 +1676,6 @@ if __name__ == '__main__':
     else:
         logger.info("Auto-initialization disabled, skipping database setup")
     
-    # Use regular Flask app.run for now - SocketIO temporarily disabled for deployment
-    app.run(host='0.0.0.0', port=port, debug=debug)
-    # Use socketio.run instead of app.run for WebSocket support
-    # socketio.run(app, host='0.0.0.0', port=port, debug=debug) 
+    # Phase 1: Use socketio.run for minimal SocketIO testing
+    logger.info("Starting SocketIO server - Phase 1")
+    socketio.run(app, host='0.0.0.0', port=port, debug=debug) 
