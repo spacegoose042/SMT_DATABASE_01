@@ -1535,12 +1535,30 @@ def mobile_qr_lookup(qr_code):
 
 # Server-Sent Events (SSE) Implementation
 @app.route('/api/events')
-@require_auth(['admin', 'scheduler', 'supervisor', 'floor_view'])
 def stream_events():
     """Server-Sent Events endpoint for real-time updates"""
+    # Get token from query parameter since EventSource can't send headers
+    token = request.args.get('token')
+    if not token:
+        return jsonify({'error': 'Authentication token required'}), 401
+    
+    # Validate token
+    try:
+        payload = decode_jwt_token(token)
+        if not payload:
+            return jsonify({'error': 'Invalid token'}), 401
+        
+        user_role = payload.get('role')
+        if user_role not in ['admin', 'scheduler', 'supervisor', 'floor_view']:
+            return jsonify({'error': 'Access denied'}), 403
+            
+    except Exception as e:
+        logger.error(f"SSE auth error: {e}")
+        return jsonify({'error': 'Authentication failed'}), 401
+    
     def event_generator():
         # Send initial connection message
-        yield f"data: {json.dumps({'type': 'connected', 'message': 'SSE connected', 'timestamp': datetime.now().isoformat()})}\n\n"
+        yield f"data: {json.dumps({'type': 'connected', 'message': 'SSE connected', 'user': payload.get('username'), 'timestamp': datetime.now().isoformat()})}\n\n"
         
         # Keep connection alive and send updates
         last_heartbeat = time.time()

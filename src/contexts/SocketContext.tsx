@@ -1,5 +1,4 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { io, Socket } from 'socket.io-client';
 
 interface WorkOrderUpdate {
   type: 'status_update';
@@ -30,134 +29,119 @@ interface GeneralUpdate {
   timestamp: string;
 }
 
-interface SocketContextType {
-  socket: Socket | null;
+interface SSEContextType {
   connected: boolean;
-  joinRooms: (rooms: string[]) => void;
-  leaveRooms: (rooms: string[]) => void;
   onWorkOrderUpdate: (callback: (update: WorkOrderUpdate) => void) => () => void;
   onGeneralUpdate: (callback: (update: GeneralUpdate) => void) => () => void;
 }
 
-const SocketContext = createContext<SocketContextType | undefined>(undefined);
+const SSEContext = createContext<SSEContextType | undefined>(undefined);
 
-interface SocketProviderProps {
+interface SSEProviderProps {
   children: ReactNode;
 }
 
-export function SocketProvider({ children }: SocketProviderProps) {
-  const [socket, setSocket] = useState<Socket | null>(null);
+export function SocketProvider({ children }: SSEProviderProps) {
   const [connected, setConnected] = useState(false);
+  const [eventSource, setEventSource] = useState<EventSource | null>(null);
+  const [workOrderCallbacks, setWorkOrderCallbacks] = useState<Array<(update: WorkOrderUpdate) => void>>([]);
+  const [generalCallbacks, setGeneralCallbacks] = useState<Array<(update: GeneralUpdate) => void>>([]);
 
   useEffect(() => {
-    // Determine the WebSocket URL based on environment
+    // Get auth token from local storage or auth context
+    const token = localStorage.getItem('auth_token');
+    if (!token) {
+      console.log('No auth token found, skipping SSE connection');
+      return;
+    }
+
+    // Determine the SSE URL based on environment
     const isDev = process.env.NODE_ENV === 'development';
-    const socketUrl = isDev 
-      ? 'https://smtdatabase01-production.up.railway.app'  // Use Railway for dev too
-      : window.location.origin; // Use same origin in production
+    const baseUrl = isDev 
+      ? 'https://smtdatabase01-production.up.railway.app'
+      : window.location.origin;
 
-    console.log('Connecting to Socket.IO server:', socketUrl);
+    // Include token in URL since EventSource doesn't support custom headers
+    const eventSourceUrl = `${baseUrl}/api/events?token=${encodeURIComponent(token)}`;
+    console.log('Connecting to SSE server:', eventSourceUrl);
 
-    // Create socket connection
-    const newSocket = io(socketUrl, {
-      transports: ['websocket', 'polling'], // Fallback to polling if WebSocket fails
-      timeout: 20000,
-      autoConnect: true
-    });
-
-    // Connection event handlers
-    newSocket.on('connect', () => {
-      console.log('✅ Connected to real-time server');
+    // Create EventSource connection
+    const newEventSource = new EventSource(eventSourceUrl);
+    
+    newEventSource.onopen = () => {
+      console.log('✅ Connected to SSE server');
       setConnected(true);
-    });
+    };
 
-    newSocket.on('disconnect', () => {
-      console.log('❌ Disconnected from real-time server');
+    newEventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        console.log('📡 Received SSE update:', data);
+
+        if (data.type === 'status_update') {
+          // Notify all work order update callbacks
+          workOrderCallbacks.forEach(callback => callback(data));
+        } else if (data.type === 'connected') {
+          console.log('Server connection confirmed:', data.message);
+        } else if (data.type === 'heartbeat') {
+          console.log('💓 SSE heartbeat received');
+        } else {
+          // Notify general update callbacks
+          generalCallbacks.forEach(callback => callback(data));
+        }
+      } catch (error) {
+        console.error('Error parsing SSE message:', error);
+      }
+    };
+
+    newEventSource.onerror = (error) => {
+      console.error('❌ SSE connection error:', error);
       setConnected(false);
-    });
+    };
 
-    newSocket.on('connected', (data) => {
-      console.log('Server connection confirmed:', data.message);
-    });
-
-    newSocket.on('connect_error', (error) => {
-      console.error('❌ Socket connection error:', error);
-      setConnected(false);
-    });
-
-    newSocket.on('joined_rooms', (data) => {
-      console.log('✅ Joined rooms:', data.rooms);
-    });
-
-    newSocket.on('left_rooms', (data) => {
-      console.log('👋 Left rooms:', data.rooms);
-    });
-
-    newSocket.on('error', (data) => {
-      console.error('Socket error:', data.message);
-    });
-
-    setSocket(newSocket);
+    setEventSource(newEventSource);
 
     // Cleanup on unmount
     return () => {
-      console.log('🔌 Closing socket connection');
-      newSocket.close();
+      console.log('🔌 Closing SSE connection');
+      newEventSource.close();
+      setConnected(false);
     };
-  }, []);
-
-  const joinRooms = (rooms: string[]) => {
-    if (socket && connected) {
-      socket.emit('join_updates', { rooms });
-    }
-  };
-
-  const leaveRooms = (rooms: string[]) => {
-    if (socket && connected) {
-      socket.emit('leave_updates', { rooms });
-    }
-  };
+  }, [workOrderCallbacks, generalCallbacks]);
 
   const onWorkOrderUpdate = (callback: (update: WorkOrderUpdate) => void) => {
-    if (!socket) return () => {};
-
-    socket.on('work_order_updated', callback);
+    setWorkOrderCallbacks(prev => [...prev, callback]);
     
     // Return cleanup function
     return () => {
-      socket.off('work_order_updated', callback);
+      setWorkOrderCallbacks(prev => prev.filter(cb => cb !== callback));
     };
   };
 
   const onGeneralUpdate = (callback: (update: GeneralUpdate) => void) => {
-    if (!socket) return () => {};
-
-    socket.on('general_update', callback);
+    setGeneralCallbacks(prev => [...prev, callback]);
     
     // Return cleanup function
     return () => {
-      socket.off('general_update', callback);
+      setGeneralCallbacks(prev => prev.filter(cb => cb !== callback));
     };
   };
 
-  const contextValue: SocketContextType = {
-    socket,
+  const contextValue: SSEContextType = {
     connected,
-    joinRooms,
-    leaveRooms,
     onWorkOrderUpdate,
     onGeneralUpdate
   };
 
   return (
-    <SocketContext.Provider value={contextValue}>
+    <SSEContext.Provider value={contextValue}>
       {children}
-    </SocketContext.Provider>
+    </SSEContext.Provider>
   );
 }
 
 export function useSocket() {
-  const context = useContext(SocketContext);
+  const context = useContext(SSEContext);
   if (context === undefined) {
     throw new Error('useSocket must be used within a SocketProvider');
   }
