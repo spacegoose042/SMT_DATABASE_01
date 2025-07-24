@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Clock, Package, User, Calendar, AlertCircle, Wifi, WifiOff, ArrowLeftIcon } from 'lucide-react';
 import { useSocket } from '../contexts/SocketContext.tsx';
@@ -52,20 +52,79 @@ const FloorDisplay: React.FC = () => {
     userCount 
   } = useSocket();
 
+  const fetchLineScheduleCallback = useCallback(async () => {
+    if (!lineId) return;
+    
+    try {
+      setLoading(true);
+      const baseUrl = process.env.NODE_ENV === 'production' 
+        ? window.location.origin 
+        : 'https://smtdatabase01-production.up.railway.app';
+      const url = `${baseUrl}/api/schedule/line/${lineId}`;
+      
+      console.log('🔍 FloorDisplay: Fetching line schedule');
+      console.log('📍 Environment:', process.env.NODE_ENV);
+      console.log('🌐 Base URL:', baseUrl);
+      console.log('🔗 Full URL:', url);
+      console.log('🆔 Line ID:', lineId);
+      
+      // Create an AbortController for timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+      
+      console.log('🚀 Starting fetch request...');
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        mode: 'cors',
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+      console.log('📡 Response received!');
+      console.log('📡 Response status:', response.status);
+      console.log('📡 Response OK:', response.ok);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ Response error:', errorText);
+        throw new Error(`Failed to fetch line schedule: ${response.status} ${errorText}`);
+      }
+
+      const data = await response.json();
+      console.log('✅ Successfully fetched data:', data);
+      setScheduleData(data);
+      setError(null);
+    } catch (err) {
+      console.error('❌ Fetch error:', err);
+      
+      if (err instanceof Error) {
+        if (err.name === 'AbortError') {
+          setError('Request timed out. Please try again.');
+        } else if (err.message.includes('Failed to fetch')) {
+          setError('Network error. Unable to connect to server.');
+        } else {
+          setError(err.message);
+        }
+      } else {
+        setError('An unknown error occurred');
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [lineId]);
+
   useEffect(() => {
     if (lineId) {
-      fetchLineSchedule();
-      
-      // Join the floor_display room for real-time updates
-      if (socketConnected) {
-        joinRooms(['floor_display']);
-      }
+      fetchLineScheduleCallback();
       
       // Periodic refresh as backup (every 5 minutes)
-      const interval = setInterval(fetchLineSchedule, 300000);
+      const interval = setInterval(fetchLineScheduleCallback, 300000);
       return () => clearInterval(interval);
     }
-  }, [lineId, socketConnected, joinRooms]);
+  }, [lineId, fetchLineScheduleCallback]);
 
   // Real-time update handler
   useEffect(() => {
@@ -75,12 +134,12 @@ const FloorDisplay: React.FC = () => {
       // If the update affects our line, refresh the data
       const updateLineNumber = update.work_order?.line_number?.toString();
       if (updateLineNumber === lineId || !updateLineNumber) {
-        fetchLineSchedule();
+        fetchLineScheduleCallback();
       }
     });
 
     return unsubscribe;
-  }, [onWorkOrderUpdate, lineId]);
+  }, [onWorkOrderUpdate, lineId, fetchLineScheduleCallback]);
 
   // Socket.IO room joining effect
   useEffect(() => {
@@ -95,29 +154,7 @@ const FloorDisplay: React.FC = () => {
     return () => clearInterval(timer);
   }, []);
 
-  const fetchLineSchedule = async () => {
-    if (!lineId) return;
-    
-    try {
-      setLoading(true);
-      const baseUrl = process.env.NODE_ENV === 'production' 
-        ? window.location.origin 
-        : 'https://smtdatabase01-production.up.railway.app';
-      const response = await fetch(`${baseUrl}/api/schedule/line/${lineId}`);
-      
-      if (!response.ok) {
-        throw new Error('Failed to fetch line schedule');
-      }
 
-      const data = await response.json();
-      setScheduleData(data);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -178,7 +215,7 @@ const FloorDisplay: React.FC = () => {
           <p className="text-xl text-gray-300 mb-8">{error || 'Production line not found'}</p>
           <div className="flex gap-4 justify-center">
             <button
-              onClick={fetchLineSchedule}
+                              onClick={fetchLineScheduleCallback}
               className="bg-sy-green-600 hover:bg-sy-green-700 text-white px-8 py-4 rounded-lg text-xl"
             >
               Try Again
@@ -200,7 +237,7 @@ const FloorDisplay: React.FC = () => {
   const nextJobs = scheduleData.jobs.filter(job => job.position_label.startsWith('NEXT'));
 
   return (
-    <div className="min-h-screen bg-sy-black-900 text-white">
+    <div className="bg-sy-black-900 text-white min-h-screen">
       {/* Header */}
       <div className="bg-sy-black-800 border-b-4 border-sy-green-500">
         <div className="max-w-7xl mx-auto px-8 py-6">

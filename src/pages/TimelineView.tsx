@@ -173,7 +173,27 @@ const TimelineView: React.FC = () => {
       const timelineData = await timelineResponse.json();
       const linesData = await linesResponse.json();
 
-      setWorkOrders(timelineData.work_orders || []);
+      const workOrdersData = timelineData.work_orders || [];
+      
+      // 🐛 DEBUG: Check for duplicate or missing IDs
+      console.group('🔍 WORK ORDER ID ANALYSIS');
+      const idCounts: { [key: string]: number } = {};
+      const nullIds: { index: number; workOrder: string }[] = [];
+      
+      workOrdersData.forEach((wo, index) => {
+        if (!wo.id || wo.id === null || wo.id === undefined) {
+          nullIds.push({ index, workOrder: wo.work_order_number });
+        } else {
+          idCounts[wo.id] = (idCounts[wo.id] || 0) + 1;
+        }
+      });
+      
+      console.log('📊 Work Orders with NULL/undefined IDs:', nullIds);
+      console.log('📊 ID frequency count:', idCounts);
+      console.log('📊 Duplicate IDs found:', Object.entries(idCounts).filter(([id, count]) => (count as number) > 1));
+      console.groupEnd();
+
+      setWorkOrders(workOrdersData);
       setProductionLines(linesData.production_lines || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
@@ -235,6 +255,9 @@ const TimelineView: React.FC = () => {
 
   // Handle work order selection
   const handleWorkOrderSelect = (workOrderId: string, workOrderNumber: string) => {
+    console.log('🎯 Selecting work order:', { workOrderId, workOrderNumber });
+    console.log('📋 All work orders IDs:', workOrders.map(wo => ({ id: wo.id, number: wo.work_order_number })));
+    
     setSelectedWorkOrder(workOrderId);
     
     // Broadcast selection to other users
