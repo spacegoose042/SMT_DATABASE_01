@@ -1636,7 +1636,7 @@ def broadcast_status_update(work_order_data, old_status, new_status, updated_by)
 def get_user_from_token(token):
     """Extract user info from JWT token"""
     try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=['HS256'])
+        payload = jwt.decode(token, app.config['JWT_SECRET_KEY'], algorithms=['HS256'])
         return {
             'user_id': payload.get('user_id'),
             'username': payload.get('username'),
@@ -1701,31 +1701,39 @@ def handle_connect(auth):
     """Handle client connection with authentication"""
     logger.info(f"Client connected: {request.sid}")
     
-    # Extract token from auth data
-    token = auth.get('token') if auth else None
-    if not token:
-        logger.warning(f"Client {request.sid} connected without token")
-        emit('error', {'message': 'Authentication required'})
+    try:
+        # Extract token from auth data
+        token = auth.get('token') if auth else None
+        if not token:
+            logger.warning(f"Client {request.sid} connected without token")
+            emit('error', {'message': 'Authentication required'})
+            return False
+        
+        # Validate user
+        user_info = get_user_from_token(token)
+        if not user_info:
+            logger.warning(f"Client {request.sid} provided invalid token")
+            emit('error', {'message': 'Invalid authentication token'})
+            return False
+        
+        # Store user session
+        user_sessions[request.sid] = {
+            'user_info': user_info,
+            'rooms': set()
+        }
+        
+        emit('connected', {
+            'message': 'Connected to Socket.IO server',
+            'sid': request.sid,
+            'user': user_info
+        })
+        
+        logger.info(f"User {user_info['username']} authenticated successfully")
+        
+    except Exception as e:
+        logger.error(f"Error in Socket.IO connect handler: {e}")
+        emit('error', {'message': 'Connection failed'})
         return False
-    
-    # Validate user
-    user_info = get_user_from_token(token)
-    if not user_info:
-        logger.warning(f"Client {request.sid} provided invalid token")
-        emit('error', {'message': 'Invalid authentication token'})
-        return False
-    
-    # Store user session
-    user_sessions[request.sid] = {
-        'user_info': user_info,
-        'rooms': set()
-    }
-    
-    emit('connected', {
-        'message': 'Connected to Socket.IO server',
-        'sid': request.sid,
-        'user': user_info
-    })
 
 @socketio.on('disconnect') 
 def handle_disconnect():
