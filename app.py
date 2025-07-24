@@ -764,6 +764,7 @@ def get_schedule_timeline():
         # Use the same query structure as /api/work-orders (which works)
         cursor.execute("""
             SELECT 
+                wo.id,
                 wo.work_order_number,
                 c.name as customer_name,
                 a.assembly_number,
@@ -792,28 +793,29 @@ def get_schedule_timeline():
         work_orders = []
         for row in cursor.fetchall():
             # Calculate total duration in hours
-            setup_hours = float(row[8]) if row[8] else 0.0
-            prod_minutes = float(row[9]) if row[9] else 0.0
-            prod_hours = float(row[10]) if row[10] else 0.0
-            prod_days = float(row[11]) if row[11] else 0.0
+            setup_hours = float(row[9]) if row[9] else 0.0
+            prod_minutes = float(row[10]) if row[10] else 0.0
+            prod_hours = float(row[11]) if row[11] else 0.0
+            prod_days = float(row[12]) if row[12] else 0.0
             
             total_hours = setup_hours + (prod_minutes / 60.0) + prod_hours + (prod_days * 8.0)
             
             work_orders.append({
-                'work_order_number': row[0],
-                'customer_name': row[1],
-                'assembly_number': row[2],
-                'revision': row[3],
-                'quantity': row[4],
-                'status': row[5],
-                'kit_date': row[6].isoformat() if row[6] else None,
-                'ship_date': row[7].isoformat() if row[7] else None,
+                'id': row[0],
+                'work_order_number': row[1],
+                'customer_name': row[2],
+                'assembly_number': row[3],
+                'revision': row[4],
+                'quantity': row[5],
+                'status': row[6],
+                'kit_date': row[7].isoformat() if row[7] else None,
+                'ship_date': row[8].isoformat() if row[8] else None,
                 'setup_hours_estimated': setup_hours,
                 'production_hours_estimated': prod_hours,
                 'total_duration_hours': total_hours,
-                'trolley_number': row[12],
-                'line_name': row[13],
-                'line_position': row[14],
+                'trolley_number': row[13],
+                'line_name': row[14],
+                'line_position': row[15],
                 'scheduled_start_time': None,  # Not yet implemented
                 'scheduled_end_time': None,    # Not yet implemented
             })
