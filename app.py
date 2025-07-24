@@ -37,6 +37,10 @@ socketio = SocketIO(app, cors_allowed_origins="*", logger=True, engineio_logger=
 update_queue = Queue()
 connected_clients = set()
 
+# Enhanced Room Management for Phase 3
+room_users = {}  # Track users in each room: {room_name: {sid: user_info}}
+user_sessions = {}  # Track user sessions: {sid: {user_info, rooms}}
+
 # JWT configuration
 app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'smt-production-database-secret-key-change-in-production')
 app.config['JWT_EXPIRATION_DELTA'] = timedelta(hours=24)
@@ -1628,37 +1632,213 @@ def broadcast_status_update(work_order_data, old_status, new_status, updated_by)
     except Exception as e:
         logger.error(f"Error broadcasting status update: {e}")
 
-# Socket.IO Event Handlers
+# Enhanced Room Management for Phase 3
+def get_user_from_token(token):
+    """Extract user info from JWT token"""
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=['HS256'])
+        return {
+            'user_id': payload.get('user_id'),
+            'username': payload.get('username'),
+            'role': payload.get('role')
+        }
+    except jwt.InvalidTokenError:
+        return None
+
+def add_user_to_room(sid, room, user_info):
+    """Add user to room with tracking"""
+    if room not in room_users:
+        room_users[room] = {}
+    
+    room_users[room][sid] = user_info
+    
+    if sid not in user_sessions:
+        user_sessions[sid] = {'user_info': user_info, 'rooms': set()}
+    user_sessions[sid]['rooms'].add(room)
+    
+    logger.info(f"User {user_info['username']} ({sid}) joined room: {room}")
+
+def remove_user_from_room(sid, room):
+    """Remove user from room"""
+    if room in room_users and sid in room_users[room]:
+        user_info = room_users[room][sid]
+        del room_users[room][sid]
+        
+        if sid in user_sessions:
+            user_sessions[sid]['rooms'].discard(room)
+        
+        logger.info(f"User {user_info['username']} ({sid}) left room: {room}")
+        return user_info
+    return None
+
+def cleanup_user_session(sid):
+    """Clean up user from all rooms on disconnect"""
+    if sid in user_sessions:
+        user_info = user_sessions[sid]['user_info']
+        rooms = list(user_sessions[sid]['rooms'])
+        
+        for room in rooms:
+            remove_user_from_room(sid, room)
+            # Broadcast user left to room
+            socketio.emit('user_left_room', {
+                'user': user_info,
+                'room': room,
+                'timestamp': datetime.now().isoformat()
+            }, room=room)
+        
+        del user_sessions[sid]
+        logger.info(f"Cleaned up session for user {user_info['username']} ({sid})")
+
+def get_room_users(room):
+    """Get list of users in a room"""
+    if room not in room_users:
+        return []
+    return list(room_users[room].values())
+
+# Socket.IO Event Handlers - Enhanced
 @socketio.on('connect')
-def handle_connect():
-    """Handle client connection"""
+def handle_connect(auth):
+    """Handle client connection with authentication"""
     logger.info(f"Client connected: {request.sid}")
-    emit('connected', {'message': 'Connected to Socket.IO server', 'sid': request.sid})
+    
+    # Extract token from auth data
+    token = auth.get('token') if auth else None
+    if not token:
+        logger.warning(f"Client {request.sid} connected without token")
+        emit('error', {'message': 'Authentication required'})
+        return False
+    
+    # Validate user
+    user_info = get_user_from_token(token)
+    if not user_info:
+        logger.warning(f"Client {request.sid} provided invalid token")
+        emit('error', {'message': 'Invalid authentication token'})
+        return False
+    
+    # Store user session
+    user_sessions[request.sid] = {
+        'user_info': user_info,
+        'rooms': set()
+    }
+    
+    emit('connected', {
+        'message': 'Connected to Socket.IO server',
+        'sid': request.sid,
+        'user': user_info
+    })
 
 @socketio.on('disconnect') 
 def handle_disconnect():
-    """Handle client disconnection"""
+    """Handle client disconnection with cleanup"""
     logger.info(f"Client disconnected: {request.sid}")
+    cleanup_user_session(request.sid)
 
 @socketio.on('join_room')
 def handle_join_room(data):
-    """Handle client joining a room"""
+    """Handle client joining a room with user presence"""
     room = data.get('room')
-    if room in ['timeline', 'floor_display']:
-        join_room(room)
-        logger.info(f"Client {request.sid} joined room: {room}")
-        emit('room_joined', {'room': room, 'message': f'Joined {room} room'})
-    else:
+    if room not in ['timeline', 'floor_display']:
         emit('error', {'message': f'Invalid room: {room}'})
+        return
+    
+    if request.sid not in user_sessions:
+        emit('error', {'message': 'User session not found'})
+        return
+    
+    user_info = user_sessions[request.sid]['user_info']
+    
+    join_room(room)
+    add_user_to_room(request.sid, room, user_info)
+    
+    # Get current room users
+    room_users_list = get_room_users(room)
+    
+    # Notify user of successful join
+    emit('room_joined', {
+        'room': room, 
+        'message': f'Joined {room} room',
+        'users_in_room': room_users_list,
+        'user_count': len(room_users_list)
+    })
+    
+    # Broadcast to others in room that user joined
+    emit('user_joined_room', {
+        'user': user_info,
+        'room': room,
+        'user_count': len(room_users_list),
+        'timestamp': datetime.now().isoformat()
+    }, room=room, include_self=False)
 
 @socketio.on('leave_room')
 def handle_leave_room(data):
-    """Handle client leaving a room"""
+    """Handle client leaving a room with presence updates"""
+    room = data.get('room')
+    if room not in ['timeline', 'floor_display']:
+        emit('error', {'message': f'Invalid room: {room}'})
+        return
+    
+    user_info = remove_user_from_room(request.sid, room)
+    if user_info:
+        leave_room(room)
+        
+        room_users_list = get_room_users(room)
+        
+        emit('room_left', {
+            'room': room, 
+            'message': f'Left {room} room'
+        })
+        
+        # Broadcast to others that user left
+        emit('user_left_room', {
+            'user': user_info,
+            'room': room,
+            'user_count': len(room_users_list),
+            'timestamp': datetime.now().isoformat()
+        }, room=room)
+    else:
+        emit('error', {'message': f'User not in room: {room}'})
+
+# New Interactive Features
+@socketio.on('timeline_interaction')
+def handle_timeline_interaction(data):
+    """Handle Timeline-specific interactions"""
+    if request.sid not in user_sessions:
+        emit('error', {'message': 'User session not found'})
+        return
+    
+    user_info = user_sessions[request.sid]['user_info']
+    interaction_type = data.get('type')
+    
+    if interaction_type == 'work_order_select':
+        # Broadcast work order selection to other timeline users
+        emit('timeline_work_order_selected', {
+            'user': user_info,
+            'work_order_id': data.get('work_order_id'),
+            'work_order_number': data.get('work_order_number'),
+            'timestamp': datetime.now().isoformat()
+        }, room='timeline', include_self=False)
+        
+    elif interaction_type == 'status_change_start':
+        # Broadcast that user is starting a status change
+        emit('timeline_status_change_start', {
+            'user': user_info,
+            'work_order_id': data.get('work_order_id'),
+            'work_order_number': data.get('work_order_number'),
+            'timestamp': datetime.now().isoformat()
+        }, room='timeline', include_self=False)
+
+@socketio.on('get_room_users')
+def handle_get_room_users(data):
+    """Get current users in a room"""
     room = data.get('room')
     if room in ['timeline', 'floor_display']:
-        leave_room(room)
-        logger.info(f"Client {request.sid} left room: {room}")
-        emit('room_left', {'room': room, 'message': f'Left {room} room'})
+        room_users_list = get_room_users(room)
+        emit('room_users_update', {
+            'room': room,
+            'users': room_users_list,
+            'user_count': len(room_users_list),
+            'timestamp': datetime.now().isoformat()
+        })
     else:
         emit('error', {'message': f'Invalid room: {room}'})
 

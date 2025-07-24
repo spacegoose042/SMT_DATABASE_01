@@ -10,7 +10,7 @@ interface HeaderProps {
 
 function Header({ onMenuClick }: HeaderProps) {
   const { user, logout } = useAuth();
-  const { connected, socketConnected } = useSocket();
+  const { connected, socketConnected, userCount } = useSocket();
 
   return (
     <header className="bg-white shadow-sm border-b border-gray-200">
@@ -51,6 +51,14 @@ function Header({ onMenuClick }: HeaderProps) {
                   )}
                   <span className="text-xs text-gray-600">Socket</span>
                 </div>
+
+                {/* User Count */}
+                {socketConnected && userCount > 0 && (
+                  <div className="flex items-center space-x-1 bg-blue-50 px-2 py-1 rounded-md">
+                    <UserIcon className="h-4 w-4 text-blue-600" />
+                    <span className="text-xs text-blue-600 font-medium">{userCount}</span>
+                  </div>
+                )}
               </div>
             </div>
           </div>

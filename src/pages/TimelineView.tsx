@@ -38,14 +38,84 @@ const TimelineView: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [selectedWeeks, setSelectedWeeks] = useState(4);
   const [lastUpdated, setLastUpdated] = useState<string>('');
-  const { connected, socketConnected, onWorkOrderUpdate, joinRooms } = useSocket();
+  const [selectedWorkOrder, setSelectedWorkOrder] = useState<string | null>(null);
+  const [userInteractions, setUserInteractions] = useState<Map<string, any>>(new Map());
+  
+  const { 
+    connected, 
+    socketConnected, 
+    onWorkOrderUpdate, 
+    joinRooms, 
+    roomUsers, 
+    userCount,
+    onUserJoinedRoom,
+    onUserLeftRoom,
+    onTimelineInteraction,
+    sendTimelineInteraction,
+    getRoomUsers
+  } = useSocket();
 
   // Join Socket.IO room for real-time timeline updates
   useEffect(() => {
     if (socketConnected) {
       joinRooms(['timeline']);
+      // Get current room users
+      setTimeout(() => getRoomUsers('timeline'), 500);
     }
-  }, [socketConnected, joinRooms]);
+  }, [socketConnected, joinRooms, getRoomUsers]);
+
+  // Listen for user presence changes
+  useEffect(() => {
+    const cleanupJoined = onUserJoinedRoom((data) => {
+      console.log(`👋 ${data.user.username} joined the timeline view`);
+      // Could show a notification here
+    });
+
+    const cleanupLeft = onUserLeftRoom((data) => {
+      console.log(`👋 ${data.user.username} left the timeline view`);
+      // Clear any interactions from this user
+      setUserInteractions(prev => {
+        const newMap = new Map(prev);
+        newMap.delete(data.user.user_id);
+        return newMap;
+      });
+    });
+
+    return () => {
+      cleanupJoined();
+      cleanupLeft();
+    };
+  }, [onUserJoinedRoom, onUserLeftRoom]);
+
+  // Listen for timeline interactions from other users
+  useEffect(() => {
+    const cleanup = onTimelineInteraction((data) => {
+      console.log(`🎯 ${data.user.username} interacted with ${data.work_order_number}`);
+      
+      setUserInteractions(prev => {
+        const newMap = new Map(prev);
+        newMap.set(data.user.user_id, {
+          username: data.user.username,
+          work_order_id: data.work_order_id,
+          work_order_number: data.work_order_number,
+          timestamp: data.timestamp,
+          type: 'work_order_select'
+        });
+        return newMap;
+      });
+
+      // Clear interaction after 5 seconds
+      setTimeout(() => {
+        setUserInteractions(prev => {
+          const newMap = new Map(prev);
+          newMap.delete(data.user.user_id);
+          return newMap;
+        });
+      }, 5000);
+    });
+
+    return cleanup;
+  }, [onTimelineInteraction]);
 
   // Listen for real-time work order updates (from both SSE and Socket.IO)
   useEffect(() => {
@@ -159,6 +229,19 @@ const TimelineView: React.FC = () => {
     });
 
     return grouped;
+  };
+
+  // Handle work order selection
+  const handleWorkOrderSelect = (workOrderId: string, workOrderNumber: string) => {
+    setSelectedWorkOrder(workOrderId);
+    
+    // Broadcast selection to other users
+    sendTimelineInteraction('work_order_select', workOrderId, workOrderNumber);
+    
+    // Clear selection after 3 seconds
+    setTimeout(() => {
+      setSelectedWorkOrder(null);
+    }, 3000);
   };
 
   if (loading) {
@@ -298,27 +381,57 @@ const TimelineView: React.FC = () => {
                         <div className="col-span-2 text-center">Ship Date</div>
                         <div className="col-span-1 text-right">Rev</div>
                       </div>
-                      {orders.map((wo, index) => (
-                        <div
-                          key={`${lineName}-${wo.id || wo.work_order_number}-${index}`}
-                          className="grid grid-cols-12 gap-4 p-4 bg-sy-black-50 rounded-lg border border-gray-200 hover:border-sy-green-300 transition-colors items-center"
-                        >
-                        {/* Position */}
-                        <div className="col-span-1 text-center">
-                          <span className="text-sm font-medium text-sy-black-700">
-                            #{index + 1}
-                          </span>
-                        </div>
-                        
-                        {/* Work Order Info */}
-                        <div className="col-span-4">
-                          <p className="text-sm font-medium text-sy-black-900">
-                            WO {wo.work_order_number}
-                          </p>
-                          <p className="text-sm text-sy-black-600 truncate">
-                            {wo.customer_name} - {wo.assembly_number}
-                          </p>
-                        </div>
+                      {orders.map((wo, index) => {
+                        const isSelected = selectedWorkOrder === wo.id;
+                        const hasUserInteraction = Array.from(userInteractions.values()).some(
+                          interaction => interaction.work_order_id === wo.id
+                        );
+                        const interactingUser = Array.from(userInteractions.values()).find(
+                          interaction => interaction.work_order_id === wo.id
+                        );
+
+                        return (
+                          <div
+                            key={`${lineName}-${wo.id || wo.work_order_number}-${index}`}
+                            className={`grid grid-cols-12 gap-4 p-4 rounded-lg border transition-all cursor-pointer relative ${
+                              isSelected 
+                                ? 'bg-blue-100 border-blue-300 shadow-md' 
+                                : hasUserInteraction
+                                ? 'bg-amber-50 border-amber-300'
+                                : 'bg-sy-black-50 border-gray-200 hover:border-sy-green-300'
+                            } items-center`}
+                            onClick={() => handleWorkOrderSelect(wo.id, wo.work_order_number)}
+                          >
+                            {/* User Interaction Indicator */}
+                            {hasUserInteraction && interactingUser && (
+                              <div className="absolute -top-2 -right-2 bg-amber-500 text-white text-xs px-2 py-1 rounded-full shadow-md">
+                                👁️ {interactingUser.username}
+                              </div>
+                            )}
+
+                            {/* Selection Indicator */}
+                            {isSelected && (
+                              <div className="absolute -top-2 -left-2 bg-blue-500 text-white text-xs px-2 py-1 rounded-full shadow-md">
+                                ✓ Selected
+                              </div>
+                            )}
+
+                            {/* Position */}
+                            <div className="col-span-1 text-center">
+                              <span className="text-sm font-medium text-sy-black-700">
+                                #{index + 1}
+                              </span>
+                            </div>
+                            
+                            {/* Work Order Info */}
+                            <div className="col-span-4">
+                              <p className="text-sm font-medium text-sy-black-900">
+                                WO {wo.work_order_number}
+                              </p>
+                              <p className="text-sm text-sy-black-600 truncate">
+                                {wo.customer_name} - {wo.assembly_number}
+                              </p>
+                            </div>
                         
                         {/* Status */}
                         <div className="col-span-2">
@@ -356,7 +469,8 @@ const TimelineView: React.FC = () => {
                           </p>
                         </div>
                       </div>
-                      ))}
+                        );
+                      })}
                     </>
                   )}
                 </div>

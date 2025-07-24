@@ -25,9 +25,23 @@ interface WorkOrderUpdate {
   timestamp: string;
 }
 
-interface GeneralUpdate {
-  type: string;
-  data: any;
+interface RoomUser {
+  user_id: string;
+  username: string;
+  role: string;
+}
+
+interface UserPresence {
+  user: RoomUser;
+  room: string;
+  user_count: number;
+  timestamp: string;
+}
+
+interface TimelineInteraction {
+  user: RoomUser;
+  work_order_id: string;
+  work_order_number: string;
   timestamp: string;
 }
 
@@ -37,6 +51,14 @@ interface SSEContextType {
   onWorkOrderUpdate: (callback: (update: WorkOrderUpdate) => void) => () => void;
   onGeneralUpdate: (callback: (data: any) => void) => () => void;
   joinRooms: (rooms: string[]) => void;
+  // Phase 3 features
+  roomUsers: RoomUser[];
+  userCount: number;
+  onUserJoinedRoom: (callback: (data: UserPresence) => void) => () => void;
+  onUserLeftRoom: (callback: (data: UserPresence) => void) => () => void;
+  onTimelineInteraction: (callback: (data: TimelineInteraction) => void) => () => void;
+  sendTimelineInteraction: (type: string, workOrderId: string, workOrderNumber: string) => void;
+  getRoomUsers: (room: string) => void;
 }
 
 const SSEContext = createContext<SSEContextType | undefined>(undefined);
@@ -46,11 +68,16 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   const [socketConnected, setSocketConnected] = useState(false); // Socket.IO connection
   const [eventSource, setEventSource] = useState<EventSource | null>(null);
   const [socket, setSocket] = useState<Socket | null>(null);
+  const [roomUsers, setRoomUsers] = useState<RoomUser[]>([]);
+  const [userCount, setUserCount] = useState(0);
   const { user } = useAuth();
   
   // Use refs to store callbacks to avoid recreating connections
   const workOrderCallbacksRef = useRef<((update: WorkOrderUpdate) => void)[]>([]);
   const generalCallbacksRef = useRef<((data: any) => void)[]>([]);
+  const userJoinedCallbacksRef = useRef<((data: UserPresence) => void)[]>([]);
+  const userLeftCallbacksRef = useRef<((data: UserPresence) => void)[]>([]);
+  const timelineInteractionCallbacksRef = useRef<((data: TimelineInteraction) => void)[]>([]);
 
   // SSE Connection Setup
   useEffect(() => {
@@ -123,7 +150,7 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     };
   }, [user]); // Depend on user to reconnect when auth changes
 
-  // Socket.IO Connection Setup
+  // Socket.IO Connection Setup with Phase 3 Features
   useEffect(() => {
     const token = localStorage.getItem('auth_token');
     if (!token) {
@@ -153,6 +180,8 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     newSocket.on('disconnect', () => {
       console.log('❌ Disconnected from Socket.IO server');
       setSocketConnected(false);
+      setRoomUsers([]);
+      setUserCount(0);
     });
 
     newSocket.on('connected', (data) => {
@@ -172,6 +201,72 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       });
     });
 
+    // Phase 3: User presence events
+    newSocket.on('room_joined', (data) => {
+      console.log('🏠 Room joined:', data);
+      if (data.users_in_room) {
+        setRoomUsers(data.users_in_room);
+        setUserCount(data.user_count);
+      }
+    });
+
+    newSocket.on('user_joined_room', (data) => {
+      console.log('👋 User joined room:', data);
+      setUserCount(data.user_count);
+      
+      userJoinedCallbacksRef.current.forEach(callback => {
+        try {
+          callback(data);
+        } catch (error) {
+          console.error('Error in user joined callback:', error);
+        }
+      });
+    });
+
+    newSocket.on('user_left_room', (data) => {
+      console.log('👋 User left room:', data);
+      setUserCount(data.user_count);
+      
+      userLeftCallbacksRef.current.forEach(callback => {
+        try {
+          callback(data);
+        } catch (error) {
+          console.error('Error in user left callback:', error);
+        }
+      });
+    });
+
+    newSocket.on('room_users_update', (data) => {
+      console.log('👥 Room users update:', data);
+      setRoomUsers(data.users);
+      setUserCount(data.user_count);
+    });
+
+    // Timeline interaction events
+    newSocket.on('timeline_work_order_selected', (data) => {
+      console.log('🎯 Timeline work order selected:', data);
+      
+      timelineInteractionCallbacksRef.current.forEach(callback => {
+        try {
+          callback(data);
+        } catch (error) {
+          console.error('Error in timeline interaction callback:', error);
+        }
+      });
+    });
+
+    newSocket.on('timeline_status_change_start', (data) => {
+      console.log('🔄 Timeline status change start:', data);
+      
+      timelineInteractionCallbacksRef.current.forEach(callback => {
+        try {
+          callback(data);
+        } catch (error) {
+          console.error('Error in timeline interaction callback:', error);
+        }
+      });
+    });
+
     newSocket.on('error', (error) => {
       console.error('❌ Socket.IO error:', error);
     });
@@ -183,6 +278,8 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       console.log('🔌 Closing Socket.IO connection');
       newSocket.disconnect();
       setSocketConnected(false);
+      setRoomUsers([]);
+      setUserCount(0);
     };
   }, [user]);
 
@@ -204,6 +301,30 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     };
   };
 
+  const onUserJoinedRoom = (callback: (data: UserPresence) => void) => {
+    userJoinedCallbacksRef.current.push(callback);
+    
+    return () => {
+      userJoinedCallbacksRef.current = userJoinedCallbacksRef.current.filter(cb => cb !== callback);
+    };
+  };
+
+  const onUserLeftRoom = (callback: (data: UserPresence) => void) => {
+    userLeftCallbacksRef.current.push(callback);
+    
+    return () => {
+      userLeftCallbacksRef.current = userLeftCallbacksRef.current.filter(cb => cb !== callback);
+    };
+  };
+
+  const onTimelineInteraction = (callback: (data: TimelineInteraction) => void) => {
+    timelineInteractionCallbacksRef.current.push(callback);
+    
+    return () => {
+      timelineInteractionCallbacksRef.current = timelineInteractionCallbacksRef.current.filter(cb => cb !== callback);
+    };
+  };
+
   const joinRooms = (rooms: string[]) => {
     if (socket && socketConnected) {
       rooms.forEach(room => {
@@ -215,13 +336,36 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     }
   };
 
+  const sendTimelineInteraction = (type: string, workOrderId: string, workOrderNumber: string) => {
+    if (socket && socketConnected) {
+      socket.emit('timeline_interaction', {
+        type,
+        work_order_id: workOrderId,
+        work_order_number: workOrderNumber
+      });
+    }
+  };
+
+  const getRoomUsers = (room: string) => {
+    if (socket && socketConnected) {
+      socket.emit('get_room_users', { room });
+    }
+  };
+
   return (
     <SSEContext.Provider value={{
       connected,
       socketConnected,
       onWorkOrderUpdate,
       onGeneralUpdate,
-      joinRooms
+      joinRooms,
+      roomUsers,
+      userCount,
+      onUserJoinedRoom,
+      onUserLeftRoom,
+      onTimelineInteraction,
+      sendTimelineInteraction,
+      getRoomUsers
     }}>
       {children}
     </SSEContext.Provider>
