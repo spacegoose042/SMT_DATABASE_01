@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Calendar, Clock, Users, AlertTriangle } from 'lucide-react';
+import { useSocket } from '../contexts/SocketContext.tsx';
 
 interface WorkOrder {
   id: string;
@@ -36,6 +37,49 @@ const TimelineView: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedWeeks, setSelectedWeeks] = useState(4);
+  const [lastUpdated, setLastUpdated] = useState<string>('');
+  const { connected, joinRooms, onWorkOrderUpdate } = useSocket();
+
+  // Join timeline room for real-time updates
+  useEffect(() => {
+    if (connected) {
+      joinRooms(['timeline']);
+    }
+  }, [connected, joinRooms]);
+
+  // Listen for real-time work order updates
+  useEffect(() => {
+    const cleanup = onWorkOrderUpdate((update) => {
+      console.log('📡 Received work order update:', update);
+      
+      // Update the work order in our local state
+      setWorkOrders(prevOrders => {
+        return prevOrders.map(wo => {
+          if (wo.id === update.work_order.id) {
+            return {
+              ...wo,
+              status: update.work_order.status,
+              // Update other fields if available in the update
+              customer_name: update.work_order.customer_name || wo.customer_name,
+              assembly_number: update.work_order.assembly_number || wo.assembly_number,
+              line_name: update.work_order.line_name || wo.line_name,
+              quantity: update.work_order.quantity || wo.quantity,
+              trolley_number: update.work_order.trolley_number || wo.trolley_number
+            };
+          }
+          return wo;
+        });
+      });
+
+      // Update last updated timestamp
+      setLastUpdated(new Date().toLocaleTimeString());
+      
+      // Show a brief notification (you could make this more sophisticated)
+      console.log(`✅ Updated ${update.work_order.work_order_number}: ${update.status_change.old_status} → ${update.status_change.new_status}`);
+    });
+
+    return cleanup;
+  }, [onWorkOrderUpdate]);
 
   useEffect(() => {
     fetchData();
@@ -154,31 +198,46 @@ const TimelineView: React.FC = () => {
       <div className="bg-white shadow">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="py-6">
-            <div className="flex items-center justify-between">
+            <div className="sm:flex sm:items-center sm:justify-between">
               <div>
-                <h1 className="text-3xl font-bold text-sy-black-900">Production Timeline</h1>
+                <h1 className="text-2xl font-bold leading-tight tracking-tight text-sy-black-900">
+                  Production Timeline
+                </h1>
                 <p className="mt-1 text-sm text-sy-black-600">
-                  {selectedWeeks}-week production schedule across all lines
+                  Real-time view of work orders across all production lines
+                  {lastUpdated && (
+                    <span className="ml-2 text-xs text-sy-green-600">
+                      • Last updated: {lastUpdated}
+                    </span>
+                  )}
                 </p>
               </div>
-              <div className="flex items-center space-x-4">
-                <select
-                  value={selectedWeeks}
-                  onChange={(e) => setSelectedWeeks(Number(e.target.value))}
-                  className="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-sy-green-500 focus:border-sy-green-500 sm:text-sm rounded-md"
-                >
-                  <option value={2}>2 weeks</option>
-                  <option value={3}>3 weeks</option>
-                  <option value={4}>4 weeks</option>
-                  <option value={6}>6 weeks</option>
-                </select>
-                <button
-                  onClick={fetchData}
-                  className="bg-sy-green-600 hover:bg-sy-green-700 text-white px-4 py-2 rounded-md flex items-center"
-                >
-                  <Calendar className="h-4 w-4 mr-2" />
-                  Refresh
-                </button>
+              <div className="mt-4 sm:mt-0 flex items-center space-x-4">
+                {/* Real-time Status */}
+                <div className="flex items-center space-x-2">
+                  <div className={`h-2 w-2 rounded-full ${connected ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                  <span className="text-xs text-sy-black-600">
+                    {connected ? 'Live Updates' : 'Offline'}
+                  </span>
+                </div>
+                
+                {/* Week selector */}
+                <div className="flex items-center space-x-2">
+                  <label htmlFor="weeks" className="text-sm font-medium text-sy-black-700">
+                    View:
+                  </label>
+                  <select
+                    id="weeks"
+                    value={selectedWeeks}
+                    onChange={(e) => setSelectedWeeks(Number(e.target.value))}
+                    className="rounded-md border border-sy-black-300 py-1 px-3 text-sm focus:border-sy-green-500 focus:outline-none focus:ring-1 focus:ring-sy-green-500"
+                  >
+                    <option value={1}>1 Week</option>
+                    <option value={2}>2 Weeks</option>
+                    <option value={4}>4 Weeks</option>
+                    <option value={8}>8 Weeks</option>
+                  </select>
+                </div>
               </div>
             </div>
           </div>
