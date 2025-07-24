@@ -13,6 +13,7 @@ from functools import wraps
 from flask import Flask, jsonify, request, send_from_directory
 from datetime import datetime, timedelta
 from flask_cors import CORS
+from flask_socketio import SocketIO, emit, join_room, leave_room
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -20,6 +21,9 @@ logger = logging.getLogger(__name__)
 
 # API-only Flask app - React runs locally
 app = Flask(__name__)
+
+# Configure Flask-SocketIO with CORS support
+socketio = SocketIO(app, cors_allowed_origins="*", logger=True, engineio_logger=True)
 
 # JWT configuration
 app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'smt-production-database-secret-key-change-in-production')
@@ -1091,6 +1095,7 @@ def mobile_search_work_orders():
             SELECT 
                 wo.id,
                 wo.work_order_number,
+                wo.line_number,
                 c.name as customer_name,
                 a.assembly_number,
                 wo.quantity,
@@ -1110,17 +1115,24 @@ def mobile_search_work_orders():
         
         work_orders = []
         for row in cursor.fetchall():
+            # Compute QR code if line_number is available
+            qr_code = None
+            if row[2] is not None:  # line_number
+                qr_code = f"{row[1]}-{row[2]}"  # work_order_number-line_number
+            
             work_orders.append({
                 'id': row[0],
                 'work_order_number': row[1],
-                'customer_name': row[2],
-                'assembly_number': row[3],
-                'quantity': row[4],
-                'status': row[5],
-                'line_name': row[6],
-                'trolley_number': row[7],
-                'ship_date': row[8].isoformat() if row[8] else None,
-                'last_updated': row[9].isoformat()
+                'line_number': row[2],
+                'qr_code': qr_code,
+                'customer_name': row[3],
+                'assembly_number': row[4],
+                'quantity': row[5],
+                'status': row[6],
+                'line_name': row[7],
+                'trolley_number': row[8],
+                'ship_date': row[9].isoformat() if row[9] else None,
+                'last_updated': row[10].isoformat()
             })
         
         cursor.close()
@@ -1174,7 +1186,7 @@ def mobile_update_work_order_status(work_order_id):
             
             # Get current work order
             cursor.execute("""
-                SELECT wo.work_order_number, wo.status, c.name, a.assembly_number
+                SELECT wo.work_order_number, wo.status, c.name, a.assembly_number, wo.line_number
                 FROM work_orders wo
                 JOIN assemblies a ON wo.assembly_id = a.id
                 JOIN customers c ON a.customer_id = c.id
@@ -1188,6 +1200,7 @@ def mobile_update_work_order_status(work_order_id):
                 return jsonify({'error': 'Work order not found'}), 404
             
             old_status = work_order[1]
+            line_number = work_order[4] # Get line_number from the work_order tuple
             
             # Update work order status
             cursor.execute("""
@@ -1207,6 +1220,22 @@ def mobile_update_work_order_status(work_order_id):
             cursor.close()
             connection.close()
             
+            # Prepare work order data for broadcast
+            work_order_broadcast_data = {
+                'id': work_order_id,
+                'work_order_number': work_order[0],
+                'qr_code': f"{work_order[0]}-{line_number}" if line_number else None,
+                'customer_name': work_order[2],
+                'assembly_number': work_order[3],
+                'line_name': None,  # We could fetch this if needed
+                'line_number': line_number,
+                'quantity': None,  # We could fetch this if needed
+                'trolley_number': None  # We could fetch this if needed
+            }
+            
+            # Broadcast the status update to connected clients
+            broadcast_status_update(work_order_broadcast_data, old_status, new_status, updated_by)
+            
             return jsonify({
                 'message': 'Status updated successfully',
                 'work_order_number': work_order[0],
@@ -1214,6 +1243,7 @@ def mobile_update_work_order_status(work_order_id):
                 'new_status': new_status,
                 'updated_by': updated_by,
                 'notes': notes,
+                'broadcast': 'sent',
                 'timestamp': datetime.now().isoformat()
             }), 200
             
@@ -1251,6 +1281,7 @@ def mobile_get_work_order(work_order_id):
             SELECT 
                 wo.id,
                 wo.work_order_number,
+                wo.line_number,
                 c.name as customer_name,
                 a.assembly_number,
                 a.revision,
@@ -1302,19 +1333,21 @@ def mobile_get_work_order(work_order_id):
         work_order_data = {
             'id': work_order[0],
             'work_order_number': work_order[1],
-            'customer_name': work_order[2],
-            'assembly_number': work_order[3],
-            'revision': work_order[4],
-            'quantity': work_order[5],
-            'status': work_order[6],
-            'line_name': work_order[7],
-            'trolley_number': work_order[8],
-            'ship_date': work_order[9].isoformat() if work_order[9] else None,
-            'kit_date': work_order[10].isoformat() if work_order[10] else None,
-            'setup_hours_estimated': float(work_order[11]) if work_order[11] else None,
-            'production_hours_estimated': float(work_order[12]) if work_order[12] else None,
-            'created_at': work_order[13].isoformat(),
-            'updated_at': work_order[14].isoformat(),
+            'line_number': work_order[2],
+            'qr_code': f"{work_order[1]}-{work_order[2]}", # Compute QR code
+            'customer_name': work_order[3],
+            'assembly_number': work_order[4],
+            'revision': work_order[5],
+            'quantity': work_order[6],
+            'status': work_order[7],
+            'line_name': work_order[8],
+            'trolley_number': work_order[9],
+            'ship_date': work_order[10].isoformat() if work_order[10] else None,
+            'kit_date': work_order[11].isoformat() if work_order[11] else None,
+            'setup_hours_estimated': float(work_order[12]) if work_order[12] else None,
+            'production_hours_estimated': float(work_order[13]) if work_order[13] else None,
+            'created_at': work_order[14].isoformat(),
+            'updated_at': work_order[15].isoformat(),
             'status_history': status_history
         }
         
@@ -1497,23 +1530,124 @@ def mobile_qr_lookup(qr_code):
             'timestamp': datetime.now().isoformat()
         }), 500
 
+# WebSocket Event Handlers for Real-time Updates
+@socketio.on('connect')
+def handle_connect():
+    """Handle client connection"""
+    logger.info(f"Client connected: {request.sid}")
+    emit('connected', {'message': 'Connected to SMT Database real-time updates'})
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    """Handle client disconnection"""
+    logger.info(f"Client disconnected: {request.sid}")
+
+@socketio.on('join_updates')
+def handle_join_updates(data):
+    """Join clients to update rooms for targeted notifications"""
+    try:
+        # Clients can join different rooms for targeted updates
+        rooms = data.get('rooms', ['general'])
+        
+        for room in rooms:
+            if room in ['general', 'timeline', 'floor_display', 'mobile']:
+                join_room(room)
+                logger.info(f"Client {request.sid} joined room: {room}")
+        
+        emit('joined_rooms', {'rooms': rooms, 'message': 'Joined update rooms'})
+        
+    except Exception as e:
+        logger.error(f"Error joining rooms: {e}")
+        emit('error', {'message': 'Failed to join update rooms'})
+
+@socketio.on('leave_updates')
+def handle_leave_updates(data):
+    """Leave update rooms"""
+    try:
+        rooms = data.get('rooms', ['general'])
+        
+        for room in rooms:
+            leave_room(room)
+            logger.info(f"Client {request.sid} left room: {room}")
+        
+        emit('left_rooms', {'rooms': rooms, 'message': 'Left update rooms'})
+        
+    except Exception as e:
+        logger.error(f"Error leaving rooms: {e}")
+        emit('error', {'message': 'Failed to leave update rooms'})
+
+def broadcast_status_update(work_order_data, old_status, new_status, updated_by):
+    """Broadcast work order status updates to connected clients"""
+    try:
+        update_data = {
+            'type': 'status_update',
+            'work_order': {
+                'id': work_order_data.get('id'),
+                'work_order_number': work_order_data.get('work_order_number'),
+                'qr_code': work_order_data.get('qr_code'),
+                'customer_name': work_order_data.get('customer_name'),
+                'assembly_number': work_order_data.get('assembly_number'),
+                'line_name': work_order_data.get('line_name'),
+                'line_number': work_order_data.get('line_number'),
+                'status': new_status,
+                'quantity': work_order_data.get('quantity'),
+                'trolley_number': work_order_data.get('trolley_number')
+            },
+            'status_change': {
+                'old_status': old_status,
+                'new_status': new_status,
+                'updated_by': updated_by,
+                'timestamp': datetime.now().isoformat()
+            },
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        # Broadcast to different rooms
+        socketio.emit('work_order_updated', update_data, room='general')
+        socketio.emit('work_order_updated', update_data, room='timeline')
+        socketio.emit('work_order_updated', update_data, room='mobile')
+        
+        # Send to floor display if it's for a specific line
+        if work_order_data.get('line_number'):
+            socketio.emit('work_order_updated', update_data, room=f"line_{work_order_data['line_number']}")
+        
+        logger.info(f"Broadcasted status update: {work_order_data.get('work_order_number')} {old_status} → {new_status}")
+        
+    except Exception as e:
+        logger.error(f"Error broadcasting status update: {e}")
+
+def broadcast_general_update(event_type, data):
+    """Broadcast general updates (new work orders, line status changes, etc.)"""
+    try:
+        update_data = {
+            'type': event_type,
+            'data': data,
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        socketio.emit('general_update', update_data, room='general')
+        logger.info(f"Broadcasted general update: {event_type}")
+        
+    except Exception as e:
+        logger.error(f"Error broadcasting general update: {e}")
+
 if __name__ == '__main__':
-    # Initialize database on startup (only if AUTO_INIT_DB is set)
-    logger.info("Starting SMT Production Schedule Database application v2.1 - Timeline Ready")
+    port = int(os.environ.get('PORT', 8080))
+    debug = os.environ.get('DEBUG', 'false').lower() == 'true'
     
-    auto_init = os.getenv('AUTO_INIT_DB', 'false').lower() == 'true'
+    logger.info(f"Starting SMT Production Schedule Database application v2.4 - Real-time Updates Ready")
+    
+    # Auto-initialize database if enabled
+    auto_init = os.environ.get('AUTO_INIT_DB', 'true').lower() == 'true'
     if auto_init:
-        logger.info("Auto-initialization enabled, attempting database setup...")
-        init_result = initialize_database()
-        if init_result:
-            logger.info("Database initialization successful")
+        logger.info("Auto-initialization enabled, checking database...")
+        success = initialize_database()
+        if success:
+            logger.info("Database initialization completed successfully")
         else:
-            logger.warning("Database initialization had issues, but continuing...")
+            logger.warning("Database initialization failed or was skipped")
     else:
         logger.info("Auto-initialization disabled, skipping database setup")
     
-    # Get port from environment (Railway sets PORT)
-    port = int(os.getenv('PORT', 5000))
-    
-    # Start Flask application
-    app.run(host='0.0.0.0', port=port, debug=False) 
+    # Use socketio.run instead of app.run for WebSocket support
+    socketio.run(app, host='0.0.0.0', port=port, debug=debug) 
