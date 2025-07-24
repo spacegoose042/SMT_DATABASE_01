@@ -251,8 +251,8 @@ def api_info():
     return jsonify({
         'message': 'SMT Production Schedule Database API',
         'status': 'running',
-        'version': '2.2.0',
-        'note': 'API-only backend with JWT authentication - React runs locally for development',
+        'version': '2.3.0',
+        'note': 'API-only backend with JWT authentication and mobile support - React runs locally for development',
         'endpoints': {
             'health': '/api/health',
             'auth_login': '/api/auth/login',
@@ -260,7 +260,10 @@ def api_info():
             'users': '/api/users',
             'timeline': '/api/schedule/timeline', 
             'work_orders': '/api/work-orders',
-            'production_lines': '/api/production-lines'
+            'production_lines': '/api/production-lines',
+            'mobile_search': '/api/mobile/work-orders/search',
+            'mobile_update_status': '/api/mobile/work-orders/{id}/status',
+            'mobile_statuses': '/api/mobile/statuses'
         },
         'auth': {
             'default_users': {
@@ -268,6 +271,12 @@ def api_info():
                 'scheduler': 'scheduler123', 
                 'supervisor': 'supervisor123'
             }
+        },
+        'mobile_features': {
+            'work_order_search': 'Search by WO number, customer, or assembly',
+            'status_updates': 'Update work order status with notes',
+            'status_history': 'Track all status changes with timestamps',
+            'role_based_access': 'Floor workers can view, supervisors+ can update'
         },
         'timestamp': datetime.now().isoformat()
     })
@@ -1035,6 +1044,302 @@ def init_admin_user():
             'error': str(e),
             'timestamp': datetime.now().isoformat()
         }), 500
+
+# Mobile Status Update Endpoints
+@app.route('/api/mobile/work-orders/search')
+@require_auth(['admin', 'scheduler', 'supervisor', 'floor_view'])
+def mobile_search_work_orders():
+    """Search work orders for mobile interface - simplified response"""
+    try:
+        # Get search parameters
+        query = request.args.get('q', '').strip()
+        line_id = request.args.get('line_id')
+        status = request.args.get('status')
+        limit = min(int(request.args.get('limit', 20)), 50)  # Max 50 results for mobile
+        
+        connection = get_database_connection()
+        if not connection:
+            return jsonify({'error': 'Database connection failed'}), 500
+        
+        cursor = connection.cursor()
+        
+        # Build search query
+        where_conditions = ["wo.status NOT IN ('Completed', 'Cancelled')"]
+        params = []
+        
+        if query:
+            where_conditions.append("""(
+                wo.work_order_number ILIKE %s OR 
+                c.name ILIKE %s OR 
+                a.assembly_number ILIKE %s
+            )""")
+            search_term = f'%{query}%'
+            params.extend([search_term, search_term, search_term])
+        
+        if line_id:
+            where_conditions.append("wo.line_id = %s")
+            params.append(line_id)
+            
+        if status:
+            where_conditions.append("wo.status = %s")
+            params.append(status)
+        
+        where_clause = " AND ".join(where_conditions)
+        
+        cursor.execute(f"""
+            SELECT 
+                wo.id,
+                wo.work_order_number,
+                c.name as customer_name,
+                a.assembly_number,
+                wo.quantity,
+                wo.status,
+                pl.line_name,
+                wo.trolley_number,
+                wo.ship_date,
+                wo.updated_at
+            FROM work_orders wo
+            JOIN assemblies a ON wo.assembly_id = a.id
+            JOIN customers c ON a.customer_id = c.id
+            LEFT JOIN production_lines pl ON wo.line_id = pl.id
+            WHERE {where_clause}
+            ORDER BY wo.updated_at DESC
+            LIMIT %s
+        """, params + [limit])
+        
+        work_orders = []
+        for row in cursor.fetchall():
+            work_orders.append({
+                'id': row[0],
+                'work_order_number': row[1],
+                'customer_name': row[2],
+                'assembly_number': row[3],
+                'quantity': row[4],
+                'status': row[5],
+                'line_name': row[6],
+                'trolley_number': row[7],
+                'ship_date': row[8].isoformat() if row[8] else None,
+                'last_updated': row[9].isoformat()
+            })
+        
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'work_orders': work_orders,
+            'count': len(work_orders),
+            'search_query': query,
+            'timestamp': datetime.now().isoformat()
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Mobile search error: {e}")
+        return jsonify({
+            'error': 'Search failed',
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
+@app.route('/api/mobile/work-orders/<work_order_id>/status', methods=['PUT'])
+@require_auth(['admin', 'scheduler', 'supervisor'])
+def mobile_update_work_order_status(work_order_id):
+    """Update work order status from mobile device"""
+    try:
+        data = request.get_json()
+        if not data or not data.get('status'):
+            return jsonify({'error': 'Status is required'}), 400
+        
+        new_status = data['status'].strip()
+        notes = data.get('notes', '').strip()
+        updated_by = request.current_user['username']
+        
+        # Validate status
+        valid_statuses = [
+            '1st Side Ready', 'Ready', 'Ready*', 'In Progress', 
+            'Setup', 'Running', 'Completed', 'On Hold', 'Issues',
+            'Missing TSM-125-01-L-DV', 'Quality Check', 'Cancelled'
+        ]
+        
+        if new_status not in valid_statuses:
+            return jsonify({
+                'error': f'Invalid status. Valid options: {", ".join(valid_statuses)}'
+            }), 400
+        
+        connection = get_database_connection()
+        if not connection:
+            return jsonify({'error': 'Database connection failed'}), 500
+        
+        cursor = connection.cursor()
+        
+        # Get current work order
+        cursor.execute("""
+            SELECT wo.work_order_number, wo.status, c.name, a.assembly_number
+            FROM work_orders wo
+            JOIN assemblies a ON wo.assembly_id = a.id
+            JOIN customers c ON a.customer_id = c.id
+            WHERE wo.id = %s
+        """, (work_order_id,))
+        
+        work_order = cursor.fetchone()
+        if not work_order:
+            cursor.close()
+            connection.close()
+            return jsonify({'error': 'Work order not found'}), 404
+        
+        old_status = work_order[1]
+        
+        # Update work order status
+        cursor.execute("""
+            UPDATE work_orders 
+            SET status = %s, updated_at = NOW()
+            WHERE id = %s
+        """, (new_status, work_order_id))
+        
+        # Create status history record
+        cursor.execute("""
+            INSERT INTO work_order_status_history 
+            (work_order_id, old_status, new_status, changed_by, notes, changed_at)
+            VALUES (%s, %s, %s, %s, %s, NOW())
+        """, (work_order_id, old_status, new_status, updated_by, notes))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'message': 'Status updated successfully',
+            'work_order_number': work_order[0],
+            'old_status': old_status,
+            'new_status': new_status,
+            'updated_by': updated_by,
+            'notes': notes,
+            'timestamp': datetime.now().isoformat()
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Mobile status update error: {e}")
+        return jsonify({
+            'error': 'Status update failed',
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
+@app.route('/api/mobile/work-orders/<work_order_id>')
+@require_auth(['admin', 'scheduler', 'supervisor', 'floor_view'])
+def mobile_get_work_order(work_order_id):
+    """Get work order details for mobile interface"""
+    try:
+        connection = get_database_connection()
+        if not connection:
+            return jsonify({'error': 'Database connection failed'}), 500
+        
+        cursor = connection.cursor()
+        
+        # Get work order details
+        cursor.execute("""
+            SELECT 
+                wo.id,
+                wo.work_order_number,
+                c.name as customer_name,
+                a.assembly_number,
+                a.revision,
+                wo.quantity,
+                wo.status,
+                pl.line_name,
+                wo.trolley_number,
+                wo.ship_date,
+                wo.kit_date,
+                wo.setup_hours_estimated,
+                wo.production_time_hours_estimated,
+                wo.created_at,
+                wo.updated_at
+            FROM work_orders wo
+            JOIN assemblies a ON wo.assembly_id = a.id
+            JOIN customers c ON a.customer_id = c.id
+            LEFT JOIN production_lines pl ON wo.line_id = pl.id
+            WHERE wo.id = %s
+        """, (work_order_id,))
+        
+        work_order = cursor.fetchone()
+        if not work_order:
+            cursor.close()
+            connection.close()
+            return jsonify({'error': 'Work order not found'}), 404
+        
+        # Get recent status history
+        cursor.execute("""
+            SELECT old_status, new_status, changed_by, notes, changed_at
+            FROM work_order_status_history
+            WHERE work_order_id = %s
+            ORDER BY changed_at DESC
+            LIMIT 10
+        """, (work_order_id,))
+        
+        status_history = []
+        for row in cursor.fetchall():
+            status_history.append({
+                'old_status': row[0],
+                'new_status': row[1],
+                'changed_by': row[2],
+                'notes': row[3],
+                'changed_at': row[4].isoformat()
+            })
+        
+        cursor.close()
+        connection.close()
+        
+        work_order_data = {
+            'id': work_order[0],
+            'work_order_number': work_order[1],
+            'customer_name': work_order[2],
+            'assembly_number': work_order[3],
+            'revision': work_order[4],
+            'quantity': work_order[5],
+            'status': work_order[6],
+            'line_name': work_order[7],
+            'trolley_number': work_order[8],
+            'ship_date': work_order[9].isoformat() if work_order[9] else None,
+            'kit_date': work_order[10].isoformat() if work_order[10] else None,
+            'setup_hours_estimated': float(work_order[11]) if work_order[11] else None,
+            'production_hours_estimated': float(work_order[12]) if work_order[12] else None,
+            'created_at': work_order[13].isoformat(),
+            'updated_at': work_order[14].isoformat(),
+            'status_history': status_history
+        }
+        
+        return jsonify({
+            'work_order': work_order_data,
+            'timestamp': datetime.now().isoformat()
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Mobile get work order error: {e}")
+        return jsonify({
+            'error': 'Failed to get work order',
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
+@app.route('/api/mobile/statuses')
+@require_auth(['admin', 'scheduler', 'supervisor', 'floor_view'])
+def mobile_get_valid_statuses():
+    """Get list of valid work order statuses for mobile interface"""
+    statuses = [
+        {'value': '1st Side Ready', 'label': '1st Side Ready', 'color': 'bg-yellow-500'},
+        {'value': 'Ready', 'label': 'Ready', 'color': 'bg-green-500'},
+        {'value': 'Ready*', 'label': 'Ready*', 'color': 'bg-green-400'},
+        {'value': 'In Progress', 'label': 'In Progress', 'color': 'bg-blue-500'},
+        {'value': 'Setup', 'label': 'Setup', 'color': 'bg-purple-500'},
+        {'value': 'Running', 'label': 'Running', 'color': 'bg-indigo-500'},
+        {'value': 'Quality Check', 'label': 'Quality Check', 'color': 'bg-orange-500'},
+        {'value': 'On Hold', 'label': 'On Hold', 'color': 'bg-yellow-600'},
+        {'value': 'Issues', 'label': 'Issues', 'color': 'bg-red-500'},
+        {'value': 'Completed', 'label': 'Completed', 'color': 'bg-green-600'},
+        {'value': 'Missing TSM-125-01-L-DV', 'label': 'Missing Parts', 'color': 'bg-red-600'},
+        {'value': 'Cancelled', 'label': 'Cancelled', 'color': 'bg-gray-500'}
+    ]
+    
+    return jsonify({
+        'statuses': statuses,
+        'timestamp': datetime.now().isoformat()
+    }), 200
 
 if __name__ == '__main__':
     # Initialize database on startup (only if AUTO_INIT_DB is set)

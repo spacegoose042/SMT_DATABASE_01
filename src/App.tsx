@@ -1,5 +1,8 @@
 import React, { useState } from 'react';
 import { Routes, Route } from 'react-router-dom';
+import { AuthProvider } from './contexts/AuthContext.tsx';
+import ProtectedRoute from './components/ProtectedRoute.tsx';
+import Login from './components/Login.tsx';
 import Sidebar from './components/Sidebar.tsx';
 import Header from './components/Header.tsx';
 import Dashboard from './pages/Dashboard.tsx';
@@ -16,35 +19,79 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   return (
-    <div className="h-screen flex overflow-hidden bg-sy-black-50">
-      {/* Sidebar */}
-      <Sidebar open={sidebarOpen} setOpen={setSidebarOpen} />
-      
-      {/* Main content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Header */}
-        <Header onMenuClick={() => setSidebarOpen(true)} />
+    <AuthProvider>
+      <Routes>
+        {/* Public route */}
+        <Route path="/login" element={<Login />} />
         
-        {/* Main content area */}
-        <main className="flex-1 overflow-y-auto">
-          <div className="py-6">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 md:px-8">
-              <Routes>
-                <Route path="/" element={<Dashboard />} />
-                <Route path="/work-orders" element={<WorkOrders />} />
-                <Route path="/production-lines" element={<ProductionLines />} />
-                <Route path="/schedule" element={<Schedule />} />
-                <Route path="/timeline" element={<TimelineView />} />
-                <Route path="/floor/:lineId" element={<FloorDisplay />} />
-                <Route path="/customers" element={<Customers />} />
-                <Route path="/reports" element={<Reports />} />
-                <Route path="/settings" element={<Settings />} />
-              </Routes>
+        {/* Protected routes */}
+        <Route path="/*" element={
+          <ProtectedRoute>
+            <div className="h-screen flex overflow-hidden bg-sy-black-50">
+              {/* Sidebar */}
+              <Sidebar open={sidebarOpen} setOpen={setSidebarOpen} />
+              
+              {/* Main content */}
+              <div className="flex-1 flex flex-col overflow-hidden">
+                {/* Header */}
+                <Header onMenuClick={() => setSidebarOpen(true)} />
+                
+                {/* Main content area */}
+                <main className="flex-1 overflow-y-auto">
+                  <div className="py-6">
+                    <div className="max-w-7xl mx-auto px-4 sm:px-6 md:px-8">
+                      <Routes>
+                        <Route path="/" element={<Dashboard />} />
+                        
+                        {/* Work Orders - Scheduler+ access */}
+                        <Route path="/work-orders" element={
+                          <ProtectedRoute requiredRoles={['admin', 'scheduler', 'supervisor']}>
+                            <WorkOrders />
+                          </ProtectedRoute>
+                        } />
+                        
+                        {/* Production Lines - All authenticated users */}
+                        <Route path="/production-lines" element={<ProductionLines />} />
+                        
+                        {/* Schedule - Scheduler+ access */}
+                        <Route path="/schedule" element={
+                          <ProtectedRoute requiredRoles={['admin', 'scheduler', 'supervisor']}>
+                            <Schedule />
+                          </ProtectedRoute>
+                        } />
+                        
+                        {/* Timeline - All authenticated users */}
+                        <Route path="/timeline" element={<TimelineView />} />
+                        
+                        {/* Floor Display - Public access for floor monitors */}
+                        <Route path="/floor/:lineId" element={<FloorDisplay />} />
+                        
+                        {/* Customers - Admin/Scheduler access */}
+                        <Route path="/customers" element={
+                          <ProtectedRoute requiredRoles={['admin', 'scheduler']}>
+                            <Customers />
+                          </ProtectedRoute>
+                        } />
+                        
+                        {/* Reports - All authenticated users */}
+                        <Route path="/reports" element={<Reports />} />
+                        
+                        {/* Settings - Admin only */}
+                        <Route path="/settings" element={
+                          <ProtectedRoute requiredRoles={['admin']}>
+                            <Settings />
+                          </ProtectedRoute>
+                        } />
+                      </Routes>
+                    </div>
+                  </div>
+                </main>
+              </div>
             </div>
-          </div>
-        </main>
-      </div>
-    </div>
+          </ProtectedRoute>
+        } />
+      </Routes>
+    </AuthProvider>
   );
 }
 
