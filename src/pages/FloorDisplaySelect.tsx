@@ -20,24 +20,32 @@ const FloorDisplaySelect: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
 
+  console.log('FloorDisplaySelect component loaded');
+
   useEffect(() => {
+    console.log('useEffect triggered');
     fetchProductionLines();
   }, []);
 
   const fetchProductionLines = async () => {
     try {
+      console.log('Fetching production lines...');
       setLoading(true);
       const baseUrl = process.env.NODE_ENV === 'production' ? '' : 'https://smtdatabase01-production.up.railway.app';
       const response = await fetch(`${baseUrl}/api/production-lines`);
+      
+      console.log('Response status:', response.status);
       
       if (!response.ok) {
         throw new Error('Failed to fetch production lines');
       }
 
       const data = await response.json();
+      console.log('Received data:', data);
       setProductionLines(data.production_lines || []);
       setError(null);
     } catch (err) {
+      console.error('Error fetching production lines:', err);
       setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {
       setLoading(false);
@@ -45,8 +53,11 @@ const FloorDisplaySelect: React.FC = () => {
   };
 
   const handleLineSelect = (lineId: string) => {
+    console.log('Line selected:', lineId);
     navigate(`/floor/${lineId}`);
   };
+
+  console.log('Render state:', { loading, error, productionLinesCount: productionLines.length });
 
   if (loading) {
     return (
@@ -89,6 +100,9 @@ const FloorDisplaySelect: React.FC = () => {
           <h1 className="text-4xl font-bold text-white mb-4">Floor Display Selection</h1>
           <p className="text-xl text-gray-300">
             Choose a production line to view on the floor display
+          </p>
+          <p className="text-lg text-gray-400 mt-2">
+            Found {activeLines.length} active production lines
           </p>
         </div>
 
