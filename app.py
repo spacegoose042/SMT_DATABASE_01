@@ -10,29 +10,32 @@ import logging
 import jwt
 import bcrypt
 from functools import wraps
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, Response
 from datetime import datetime, timedelta
 from flask_cors import CORS
-from flask_socketio import SocketIO, emit
+import json
+import time
+import threading
+from queue import Queue
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# API-only Flask app - React runs locally
 app = Flask(__name__)
 
-# Configure Flask-SocketIO with minimal setup for Phase 1
-socketio = SocketIO(app, cors_allowed_origins="*", logger=False, engineio_logger=False)
+# Configure CORS for REST endpoints and SSE
+CORS(app, resources={
+    r"/api/*": {"origins": "*"}
+})
+
+# Global queue for real-time updates
+update_queue = Queue()
+connected_clients = set()
 
 # JWT configuration
 app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'smt-production-database-secret-key-change-in-production')
 app.config['JWT_EXPIRATION_DELTA'] = timedelta(hours=24)
-
-# CORS configuration for local React development
-cors = CORS(app, resources={
-    r"/api/*": {"origins": "*"}
-})
 
 def get_database_connection():
     """Get database connection using DATABASE_URL from environment"""
@@ -1530,54 +1533,43 @@ def mobile_qr_lookup(qr_code):
             'timestamp': datetime.now().isoformat()
         }), 500
 
-# WebSocket Event Handlers for Real-time Updates
-# @socketio.on('connect')
-# def handle_connect():
-#     """Handle client connection"""
-#     logger.info(f"Client connected: {request.sid}")
-#     emit('connected', {'message': 'Connected to SMT Database real-time updates'})
-
-# @socketio.on('disconnect')
-# def handle_disconnect():
-#     """Handle client disconnection"""
-#     logger.info(f"Client disconnected: {request.sid}")
-
-# @socketio.on('join_updates')
-# def handle_join_updates(data):
-#     """Join clients to update rooms for targeted notifications"""
-#     try:
-#         # Clients can join different rooms for targeted updates
-#         rooms = data.get('rooms', ['general'])
+# Server-Sent Events (SSE) Implementation
+@app.route('/api/events')
+@require_auth(['admin', 'scheduler', 'supervisor', 'floor_view'])
+def stream_events():
+    """Server-Sent Events endpoint for real-time updates"""
+    def event_generator():
+        # Send initial connection message
+        yield f"data: {json.dumps({'type': 'connected', 'message': 'SSE connected', 'timestamp': datetime.now().isoformat()})}\n\n"
         
-#         for room in rooms:
-#             if room in ['general', 'timeline', 'floor_display', 'mobile']:
-#                 join_room(room)
-#                 logger.info(f"Client {request.sid} joined room: {room}")
+        # Keep connection alive and send updates
+        last_heartbeat = time.time()
         
-#         emit('joined_rooms', {'rooms': rooms, 'message': 'Joined update rooms'})
-        
-#     except Exception as e:
-#         logger.error(f"Error joining rooms: {e}")
-#         emit('error', {'message': 'Failed to join update rooms'})
-
-# @socketio.on('leave_updates')
-# def handle_leave_updates(data):
-#     """Leave update rooms"""
-#     try:
-#         rooms = data.get('rooms', ['general'])
-        
-#         for room in rooms:
-#             leave_room(room)
-#             logger.info(f"Client {request.sid} left room: {room}")
-        
-#         emit('left_rooms', {'rooms': rooms, 'message': 'Left update rooms'})
-        
-#     except Exception as e:
-#         logger.error(f"Error leaving rooms: {e}")
-#         emit('error', {'message': 'Failed to leave update rooms'})
+        while True:
+            # Send heartbeat every 30 seconds
+            if time.time() - last_heartbeat > 30:
+                yield f"data: {json.dumps({'type': 'heartbeat', 'timestamp': datetime.now().isoformat()})}\n\n"
+                last_heartbeat = time.time()
+            
+            # Check for updates in queue
+            try:
+                # Non-blocking check for updates
+                if not update_queue.empty():
+                    update = update_queue.get(timeout=1)
+                    yield f"data: {json.dumps(update)}\n\n"
+                else:
+                    time.sleep(1)  # Wait 1 second before checking again
+            except:
+                break
+    
+    response = Response(event_generator(), mimetype='text/event-stream')
+    response.headers['Cache-Control'] = 'no-cache'
+    response.headers['Connection'] = 'keep-alive'
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    return response
 
 def broadcast_status_update(work_order_data, old_status, new_status, updated_by):
-    """Broadcast work order status updates to connected clients"""
+    """Broadcast work order status updates via SSE"""
     try:
         update_data = {
             'type': 'status_update',
@@ -1602,59 +1594,22 @@ def broadcast_status_update(work_order_data, old_status, new_status, updated_by)
             'timestamp': datetime.now().isoformat()
         }
         
-        # Broadcast to different rooms
-        # socketio.emit('work_order_updated', update_data, room='general')
-        # socketio.emit('work_order_updated', update_data, room='timeline')
-        # socketio.emit('work_order_updated', update_data, room='mobile')
+        # Add to queue for SSE clients
+        update_queue.put(update_data)
         
-        # Send to floor display if it's for a specific line
-        if work_order_data.get('line_number'):
-            # socketio.emit('work_order_updated', update_data, room=f"line_{work_order_data['line_number']}")
-            pass # Temporarily disabled
-        
-        logger.info(f"Broadcasted status update: {work_order_data.get('work_order_number')} {old_status} → {new_status}")
+        logger.info(f"Broadcasted SSE update: {work_order_data.get('work_order_number')} {old_status} → {new_status}")
         
     except Exception as e:
-        logger.error(f"Error broadcasting status update: {e}")
+        logger.error(f"Error broadcasting SSE update: {e}")
 
-def broadcast_general_update(event_type, data):
-    """Broadcast general updates (new work orders, line status changes, etc.)"""
-    try:
-        update_data = {
-            'type': event_type,
-            'data': data,
-            'timestamp': datetime.now().isoformat()
-        }
-        
-        # socketio.emit('general_update', update_data, room='general')
-        logger.info(f"Broadcasted general update: {event_type}")
-        
-    except Exception as e:
-        logger.error(f"Error broadcasting general update: {e}")
-
-# PHASE 1: Minimal SocketIO Event Handlers
-@socketio.on('connect')
-def handle_connect():
-    """Handle client connection - Phase 1 minimal setup"""
-    logger.info(f"SocketIO client connected: {request.sid}")
-    emit('connected', {
-        'message': 'Connected to SMT Database - Phase 1',
-        'version': '2.4-phase1',
-        'timestamp': datetime.now().isoformat()
-    })
-
-@socketio.on('disconnect')
-def handle_disconnect():
-    """Handle client disconnection"""
-    logger.info(f"SocketIO client disconnected: {request.sid}")
-
-# Health check endpoint for SocketIO
-@app.route('/api/socketio/health')
-def socketio_health():
-    """Check if SocketIO is working"""
+# SSE Health check endpoint
+@app.route('/api/sse/health')
+def sse_health():
+    """Check if SSE is working"""
     return jsonify({
-        'socketio_status': 'active',
-        'version': '2.4-phase1',
+        'sse_status': 'active',
+        'version': '2.4-sse',
+        'queue_size': update_queue.qsize(),
         'timestamp': datetime.now().isoformat()
     })
 
@@ -1676,6 +1631,6 @@ if __name__ == '__main__':
     else:
         logger.info("Auto-initialization disabled, skipping database setup")
     
-    # Phase 1: Use socketio.run for minimal SocketIO testing
-    logger.info("Starting SocketIO server - Phase 1")
-    socketio.run(app, host='0.0.0.0', port=port, debug=debug) 
+    # Use regular Flask app.run for SSE implementation
+    logger.info("Starting SMT Production Database v2.4-SSE with Server-Sent Events")
+    app.run(host='0.0.0.0', port=port, debug=debug) 
