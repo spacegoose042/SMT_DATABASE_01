@@ -2093,6 +2093,88 @@ def sse_health():
         'timestamp': datetime.now().isoformat()
     })
 
+@app.route('/api/add-line-numbers', methods=['POST'])
+def add_line_numbers():
+    """Temporary endpoint to add line_number values to existing work orders for QR code generation"""
+    try:
+        connection = get_database_connection()
+        if not connection:
+            return jsonify({'error': 'Database connection failed'}), 500
+        
+        cursor = connection.cursor()
+        
+        # First ensure the column exists
+        try:
+            cursor.execute("ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS line_number INTEGER")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_work_orders_qr_lookup ON work_orders(work_order_number, line_number)")
+            logger.info("line_number column and index ensured")
+        except Exception as e:
+            logger.warning(f"Column/index creation warning (this is normal if they exist): {e}")
+        
+        # Get work orders without line_number
+        cursor.execute("SELECT id, work_order_number FROM work_orders WHERE line_number IS NULL")
+        work_orders = cursor.fetchall()
+        
+        if not work_orders:
+            cursor.close()
+            connection.close()
+            return jsonify({
+                'message': 'All work orders already have line_number values',
+                'updated_count': 0,
+                'timestamp': datetime.now().isoformat()
+            }), 200
+        
+        # Add random line numbers (1-5) to work orders
+        updated_count = 0
+        import random
+        
+        for wo_id, wo_number in work_orders:
+            line_number = random.randint(1, 5)
+            cursor.execute("""
+                UPDATE work_orders 
+                SET line_number = %s, updated_at = NOW()
+                WHERE id = %s
+            """, (line_number, wo_id))
+            updated_count += 1
+            logger.info(f"Updated {wo_number} -> line_number: {line_number}")
+        
+        connection.commit()
+        
+        # Get some examples of the generated QR codes
+        cursor.execute("""
+            SELECT work_order_number, line_number 
+            FROM work_orders 
+            WHERE line_number IS NOT NULL 
+            ORDER BY updated_at DESC
+            LIMIT 5
+        """)
+        
+        examples = []
+        for wo_number, line_num in cursor.fetchall():
+            qr_code = f"{wo_number}-{line_num}"
+            examples.append({
+                'work_order_number': wo_number,
+                'line_number': line_num,
+                'qr_code': qr_code
+            })
+        
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'message': f'Successfully added line_number values to {updated_count} work orders',
+            'updated_count': updated_count,
+            'examples': examples,
+            'timestamp': datetime.now().isoformat()
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Add line numbers error: {e}")
+        return jsonify({
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
     debug = os.environ.get('DEBUG', 'false').lower() == 'true'
