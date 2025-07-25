@@ -263,13 +263,22 @@ const TimelineView: React.FC = () => {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
         },
         body: JSON.stringify({ status: newStatus })
       });
 
       if (!response.ok) {
         const errorData = await response.json();
+        
+        // Handle token expiration by redirecting to login
+        if (response.status === 401 && errorData.error?.includes('token')) {
+          console.warn('Token expired, redirecting to login...');
+          localStorage.removeItem('auth_token');
+          window.location.href = '/login';
+          return;
+        }
+        
         throw new Error(errorData.error || 'Failed to update status');
       }
 
