@@ -766,6 +766,7 @@ def get_schedule_timeline():
             SELECT 
                 wo.id,
                 wo.work_order_number,
+                wo.line_number,
                 c.name as customer_name,
                 a.assembly_number,
                 a.revision,
@@ -792,30 +793,37 @@ def get_schedule_timeline():
         
         work_orders = []
         for row in cursor.fetchall():
-            # Calculate total duration in hours
-            setup_hours = float(row[9]) if row[9] else 0.0
-            prod_minutes = float(row[10]) if row[10] else 0.0
-            prod_hours = float(row[11]) if row[11] else 0.0
-            prod_days = float(row[12]) if row[12] else 0.0
+            # Calculate total duration in hours (indices shifted due to line_number)
+            setup_hours = float(row[10]) if row[10] else 0.0
+            prod_minutes = float(row[11]) if row[11] else 0.0
+            prod_hours = float(row[12]) if row[12] else 0.0
+            prod_days = float(row[13]) if row[13] else 0.0
             
             total_hours = setup_hours + (prod_minutes / 60.0) + prod_hours + (prod_days * 8.0)
+            
+            # Generate QR code if line_number is available
+            qr_code = None
+            if row[2] is not None:  # line_number
+                qr_code = f"{row[1]}-{row[2]}"  # work_order_number-line_number
             
             work_orders.append({
                 'id': row[0],
                 'work_order_number': row[1],
-                'customer_name': row[2],
-                'assembly_number': row[3],
-                'revision': row[4],
-                'quantity': row[5],
-                'status': row[6],
-                'kit_date': row[7].isoformat() if row[7] else None,
-                'ship_date': row[8].isoformat() if row[8] else None,
+                'line_number': row[2],
+                'qr_code': qr_code,
+                'customer_name': row[3],
+                'assembly_number': row[4],
+                'revision': row[5],
+                'quantity': row[6],
+                'status': row[7],
+                'kit_date': row[8].isoformat() if row[8] else None,
+                'ship_date': row[9].isoformat() if row[9] else None,
                 'setup_hours_estimated': setup_hours,
                 'production_hours_estimated': prod_hours,
                 'total_duration_hours': total_hours,
-                'trolley_number': row[13],
-                'line_name': row[14],
-                'line_position': row[15],
+                'trolley_number': row[14],
+                'line_name': row[15],
+                'line_position': row[16],
                 'scheduled_start_time': None,  # Not yet implemented
                 'scheduled_end_time': None,    # Not yet implemented
             })

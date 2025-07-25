@@ -3,10 +3,13 @@ import { Clock, Users, AlertTriangle } from 'lucide-react';
 import { useSocket } from '../contexts/SocketContext.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import StatusDropdown from '../components/StatusDropdown.tsx';
+import QRCodeDisplay from '../components/QRCodeDisplay.tsx';
 
 interface WorkOrder {
   id: string;
   work_order_number: string;
+  line_number?: number | null;
+  qr_code?: string | null;
   customer_name: string;
   assembly_number: string;
   revision: string;
@@ -458,11 +461,11 @@ const TimelineView: React.FC = () => {
                       {/* Column Headers */}
                       <div className="grid grid-cols-12 gap-4 px-4 py-2 text-xs font-medium text-sy-black-500 uppercase tracking-wider border-b border-gray-200">
                         <div className="col-span-1 text-center">#</div>
-                        <div className="col-span-4">Work Order & Customer</div>
+                        <div className="col-span-3">Work Order & Customer</div>
                         <div className="col-span-2">Status</div>
                         <div className="col-span-2 text-center">Quantity</div>
                         <div className="col-span-2 text-center">Ship Date</div>
-                        <div className="col-span-1 text-right">Rev</div>
+                        <div className="col-span-1 text-center">QR Code</div>
                       </div>
                       {orders.map((wo, index) => {
                         const isSelected = selectedWorkOrder === wo.id;
@@ -507,7 +510,7 @@ const TimelineView: React.FC = () => {
                             </div>
                             
                             {/* Work Order Info */}
-                            <div className="col-span-4">
+                            <div className="col-span-3">
                               <p className="text-sm font-medium text-sy-black-900">
                                 WO {wo.work_order_number}
                               </p>
@@ -554,11 +557,22 @@ const TimelineView: React.FC = () => {
                           )}
                         </div>
 
-                        {/* Rev/Details */}
-                        <div className="col-span-1 text-right">
-                          <p className="text-xs text-sy-black-600">
-                            Rev {wo.revision}
-                          </p>
+                        {/* QR Code */}
+                        <div className="col-span-1 text-center">
+                          {wo.qr_code ? (
+                            <QRCodeDisplay
+                              qrCode={wo.qr_code}
+                              workOrderNumber={wo.work_order_number}
+                              lineNumber={wo.line_number}
+                              size={64}
+                              showLabel={false}
+                              className="mx-auto"
+                            />
+                          ) : (
+                            <div className="text-xs text-gray-400">
+                              No QR Code
+                            </div>
+                          )}
                         </div>
                       </div>
                         );
