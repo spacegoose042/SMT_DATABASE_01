@@ -1400,14 +1400,58 @@ def mobile_get_valid_statuses():
         'timestamp': datetime.now().isoformat()
     }), 200
 
-@app.route('/api/timeline/work-orders/<work_order_id>/status', methods=['PUT'])
-@require_auth(['admin', 'scheduler', 'supervisor'])
+@app.route('/api/timeline/work-orders/<work_order_id>/status', methods=['PUT', 'OPTIONS'])
 def timeline_update_work_order_status(work_order_id):
     """Update work order status from Timeline View"""
+    
+    # Handle CORS preflight request
+    if request.method == 'OPTIONS':
+        response = jsonify({'message': 'CORS preflight'})
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+        response.headers.add('Access-Control-Allow-Methods', 'PUT,OPTIONS')
+        return response
+    
+    # Require authentication for PUT requests
+    token = None
+    if 'Authorization' in request.headers:
+        auth_header = request.headers['Authorization']
+        try:
+            token = auth_header.split(' ')[1]  # Bearer <token>
+        except IndexError:
+            pass
+    
+    if not token:
+        response = jsonify({'error': 'Authentication token required'})
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        return response, 401
+    
+    payload = decode_jwt_token(token)
+    if not payload:
+        response = jsonify({'error': 'Invalid or expired token'})
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        return response, 401
+    
+    # Check role permissions
+    required_roles = ['admin', 'scheduler', 'supervisor']
+    if payload.get('role') not in required_roles:
+        response = jsonify({'error': 'Insufficient permissions'})
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        return response, 403
+    
+    # Add user info to request context
+    request.current_user = {
+        'user_id': payload['user_id'],
+        'username': payload['username'],
+        'role': payload['role']
+    }
+    
     try:
         data = request.get_json()
         if not data or not data.get('status'):
-            return jsonify({'error': 'Status is required'}), 400
+            response = jsonify({'error': 'Status is required'})
+            response.headers.add('Access-Control-Allow-Origin', '*')
+            return response, 400
         
         new_status = data['status'].strip()
         updated_by = request.current_user['username']
@@ -1420,13 +1464,17 @@ def timeline_update_work_order_status(work_order_id):
         ]
         
         if new_status not in valid_statuses:
-            return jsonify({
+            response = jsonify({
                 'error': f'Invalid status. Valid options: {", ".join(valid_statuses)}'
-            }), 400
+            })
+            response.headers.add('Access-Control-Allow-Origin', '*')
+            return response, 400
         
         connection = get_database_connection()
         if not connection:
-            return jsonify({'error': 'Database connection failed'}), 500
+            response = jsonify({'error': 'Database connection failed'})
+            response.headers.add('Access-Control-Allow-Origin', '*')
+            return response, 500
         
         try:
             cursor = connection.cursor()
@@ -1444,7 +1492,9 @@ def timeline_update_work_order_status(work_order_id):
             if not work_order:
                 cursor.close()
                 connection.close()
-                return jsonify({'error': 'Work order not found'}), 404
+                response = jsonify({'error': 'Work order not found'})
+                response.headers.add('Access-Control-Allow-Origin', '*')
+                return response, 404
             
             old_status = work_order[1]
             
@@ -1452,12 +1502,14 @@ def timeline_update_work_order_status(work_order_id):
             if old_status == new_status:
                 cursor.close()
                 connection.close()
-                return jsonify({
+                response = jsonify({
                     'message': 'Status unchanged',
                     'work_order_number': work_order[0],
                     'status': new_status,
                     'timestamp': datetime.now().isoformat()
-                }), 200
+                })
+                response.headers.add('Access-Control-Allow-Origin', '*')
+                return response, 200
             
             # Update work order status
             cursor.execute("""
@@ -1493,7 +1545,7 @@ def timeline_update_work_order_status(work_order_id):
             # Broadcast the status update to connected clients
             broadcast_status_update(work_order_broadcast_data, old_status, new_status, updated_by)
             
-            return jsonify({
+            response = jsonify({
                 'message': 'Status updated successfully',
                 'work_order_number': work_order[0],
                 'old_status': old_status,
@@ -1501,25 +1553,31 @@ def timeline_update_work_order_status(work_order_id):
                 'updated_by': updated_by,
                 'broadcast': 'sent',
                 'timestamp': datetime.now().isoformat()
-            }), 200
+            })
+            response.headers.add('Access-Control-Allow-Origin', '*')
+            return response, 200
             
         except Exception as db_error:
             logger.error(f"Database error in timeline status update: {db_error}")
             if connection:
                 connection.rollback()
                 connection.close()
-            return jsonify({
+            response = jsonify({
                 'error': f'Database operation failed: {str(db_error)}',
                 'timestamp': datetime.now().isoformat()
-            }), 500
+            })
+            response.headers.add('Access-Control-Allow-Origin', '*')
+            return response, 500
         
     except Exception as e:
         logger.error(f"Timeline status update error: {e}")
-        return jsonify({
+        response = jsonify({
             'error': 'Status update failed',
             'details': str(e),
             'timestamp': datetime.now().isoformat()
-        }), 500
+        })
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        return response, 500
 
 @app.route('/api/mobile/qr/<qr_code>')
 @require_auth(['admin', 'scheduler', 'supervisor', 'floor_view'])
