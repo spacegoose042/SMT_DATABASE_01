@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { Clock, Users, AlertTriangle } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Clock, Users, AlertTriangle, RefreshCcwIcon, QrCodeIcon } from 'lucide-react';
 import { useSocket } from '../contexts/SocketContext.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import StatusDropdown from '../components/StatusDropdown.tsx';
@@ -37,6 +38,7 @@ interface ProductionLine {
 }
 
 const TimelineView: React.FC = () => {
+  const navigate = useNavigate();
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
   const [productionLines, setProductionLines] = useState<ProductionLine[]>([]);
   const [loading, setLoading] = useState(true);
@@ -359,6 +361,15 @@ const TimelineView: React.FC = () => {
                 </p>
               </div>
               <div className="mt-4 sm:mt-0 flex items-center space-x-4">
+                {/* QR Scanner Button */}
+                <button
+                  onClick={() => navigate('/scan')}
+                  className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-sy-green-600 hover:bg-sy-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sy-green-500 transition-colors"
+                >
+                  <QrCodeIcon className="h-4 w-4 mr-2" />
+                  QR Scanner
+                </button>
+                
                 {/* Real-time Status */}
                 <div className="flex items-center space-x-2">
                   <div className={`h-2 w-2 rounded-full ${connected ? 'bg-green-500' : 'bg-red-500'}`}></div>
@@ -512,7 +523,7 @@ const TimelineView: React.FC = () => {
                             {/* Work Order Info */}
                             <div className="col-span-3">
                               <p className="text-sm font-medium text-sy-black-900">
-                                WO {wo.work_order_number}
+                                WO {wo.work_order_number}-{wo.line_number || 1}
                               </p>
                               <p className="text-sm text-sy-black-600 truncate">
                                 {wo.customer_name} - {wo.assembly_number}

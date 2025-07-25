@@ -13,6 +13,7 @@ import Schedule from './pages/Schedule.tsx';
 import TimelineView from './pages/TimelineView.tsx';
 import FloorDisplay from './pages/FloorDisplay.tsx';
 import FloorDisplaySelect from './pages/FloorDisplaySelect.tsx';
+import ScanPage from './pages/ScanPage.tsx';
 import Customers from './pages/Customers.tsx';
 import Reports from './pages/Reports.tsx';
 import Settings from './pages/Settings.tsx';
@@ -26,6 +27,13 @@ function App() {
         <Routes>
           {/* Public route */}
           <Route path="/login" element={<Login />} />
+          
+          {/* Mobile QR Scanner - Protected but outside main layout */}
+          <Route path="/scan" element={
+            <ProtectedRoute>
+              <ScanPage />
+            </ProtectedRoute>
+          } />
           
           {/* Protected routes */}
           <Route path="/*" element={

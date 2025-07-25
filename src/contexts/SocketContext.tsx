@@ -59,6 +59,7 @@ interface SSEContextType {
   onTimelineInteraction: (callback: (data: TimelineInteraction) => void) => () => void;
   sendTimelineInteraction: (type: string, workOrderId: string, workOrderNumber: string) => void;
   getRoomUsers: (room: string) => void;
+  emit: (event: string, data: any) => void;
 }
 
 const SSEContext = createContext<SSEContextType | undefined>(undefined);
@@ -352,6 +353,12 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     }
   };
 
+  const emit = (event: string, data: any) => {
+    if (socket && socketConnected) {
+      socket.emit(event, data);
+    }
+  };
+
   return (
     <SSEContext.Provider value={{
       connected,
@@ -365,7 +372,8 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       onUserLeftRoom,
       onTimelineInteraction,
       sendTimelineInteraction,
-      getRoomUsers
+      getRoomUsers,
+      emit
     }}>
       {children}
     </SSEContext.Provider>

@@ -761,6 +761,16 @@ def get_schedule_timeline():
         connection = psycopg2.connect(os.getenv('DATABASE_URL'))
         cursor = connection.cursor()
         
+        # Ensure line_number column exists and add missing line numbers
+        try:
+            cursor.execute("ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS line_number INTEGER")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_work_orders_qr_lookup ON work_orders(work_order_number, line_number)")
+            cursor.execute("UPDATE work_orders SET line_number = FLOOR(RANDOM() * 5) + 1 WHERE line_number IS NULL")
+            connection.commit()
+        except Exception as e:
+            logger.warning(f"Line number setup warning (normal if already exists): {e}")
+            connection.rollback()
+        
         # Use the same query structure as /api/work-orders (which works)
         cursor.execute("""
             SELECT 
@@ -801,15 +811,33 @@ def get_schedule_timeline():
             
             total_hours = setup_hours + (prod_minutes / 60.0) + prod_hours + (prod_days * 8.0)
             
-            # Generate QR code if line_number is available
-            qr_code = None
-            if row[2] is not None:  # line_number
-                qr_code = f"{row[1]}-{row[2]}"  # work_order_number-line_number
+            # Extract work order line number and generate QR code
+            work_order_number = row[1]  # Full work order number like "14966.2"
+            line_number = row[2]  # existing line_number from database
+            
+            # If line_number is not set, assign 1 (most work orders are line 1, displayed as -1 in QR)
+            if line_number is None:
+                line_number = 1  # Default to line 1 for work orders
+                # Update the database with the default line_number
+                try:
+                    cursor.execute("""
+                        UPDATE work_orders 
+                        SET line_number = %s, updated_at = NOW()
+                        WHERE id = %s
+                    """, (line_number, row[0]))
+                    connection.commit()
+                    logger.info(f"Set default line_number {line_number} for work order {work_order_number}")
+                except Exception as e:
+                    logger.warning(f"Could not set default line_number: {e}")
+                    line_number = 1  # fallback
+            
+            # Generate QR code in format: work_order_number-line_number (display as -1, -2, etc.)
+            qr_code = f"{work_order_number}-{line_number}"
             
             work_orders.append({
                 'id': row[0],
                 'work_order_number': row[1],
-                'line_number': row[2],
+                'line_number': line_number,
                 'qr_code': qr_code,
                 'customer_name': row[3],
                 'assembly_number': row[4],
