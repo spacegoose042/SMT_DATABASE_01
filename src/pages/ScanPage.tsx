@@ -39,6 +39,46 @@ const ScanPage: React.FC = () => {
   const [workOrder, setWorkOrder] = useState<WorkOrderData | null>(null);
   const [updating, setUpdating] = useState(false);
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
+  const [statusOptions, setStatusOptions] = useState<string[]>([]);
+
+  // Fetch available statuses on mount
+  useEffect(() => {
+    const fetchStatuses = async () => {
+      try {
+        const baseUrl = process.env.NODE_ENV === 'production'
+          ? window.location.origin
+          : 'http://localhost:5000';
+        const response = await fetch(`${baseUrl}/api/mobile/statuses`, {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
+          }
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          const statuses = data.statuses.map((status: any) => status.value);
+          setStatusOptions(statuses);
+        } else {
+          // Fallback to hardcoded statuses if API fails
+          setStatusOptions([
+            '1st Side Ready', 'Ready', 'Ready*', 'In Progress', 'Setup', 
+            'Running', 'Quality Check', 'On Hold', 'Issues', 'Completed',
+            'Missing TSM-125-01-L-DV', 'Cancelled'
+          ]);
+        }
+      } catch (error) {
+        console.error('Error fetching statuses:', error);
+        // Fallback to hardcoded statuses
+        setStatusOptions([
+          '1st Side Ready', 'Ready', 'Ready*', 'In Progress', 'Setup', 
+          'Running', 'Quality Check', 'On Hold', 'Issues', 'Completed',
+          'Missing TSM-125-01-L-DV', 'Cancelled'
+        ]);
+      }
+    };
+
+    fetchStatuses();
+  }, []);
 
   // Request camera permission on mount
   useEffect(() => {
@@ -172,11 +212,6 @@ const ScanPage: React.FC = () => {
     setWorkOrder(null);
     startScanning();
   };
-
-  const statusOptions = [
-    'Ready', '1st Side Ready', 'Ready*', 'In Progress', 'Setup', 
-    'Running', 'Completed', 'On Hold', 'Issues', 'Quality Check'
-  ];
 
   if (hasPermission === null) {
     return (
