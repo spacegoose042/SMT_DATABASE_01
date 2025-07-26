@@ -262,7 +262,7 @@ const TimelineView: React.FC = () => {
       
       const baseUrl = process.env.NODE_ENV === 'production' 
         ? window.location.origin 
-        : 'https://smtdatabase01-production.up.railway.app';
+        : 'http://localhost:5000';
       
       const response = await fetch(`${baseUrl}/api/timeline/work-orders/${workOrderId}/status`, {
         method: 'PUT',
