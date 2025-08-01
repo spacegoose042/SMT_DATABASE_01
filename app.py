@@ -2569,20 +2569,26 @@ def migrate_add_work_hours_columns():
         conn = get_database_connection()
         cursor = conn.cursor()
         
-        # Add missing columns
-        migration_sql = """
-        ALTER TABLE production_lines 
-        ADD COLUMN IF NOT EXISTS start_time TIME DEFAULT '08:00:00',
-        ADD COLUMN IF NOT EXISTS end_time TIME DEFAULT '17:00:00',
-        ADD COLUMN IF NOT EXISTS break_duration INTEGER DEFAULT 15,
-        ADD COLUMN IF NOT EXISTS lunch_break_duration INTEGER DEFAULT 60,
-        ADD COLUMN IF NOT EXISTS lunch_break_start TIME DEFAULT '12:00:00',
-        ADD COLUMN IF NOT EXISTS auto_schedule_enabled BOOLEAN DEFAULT true,
-        ADD COLUMN IF NOT EXISTS maintenance_interval_days INTEGER DEFAULT 30,
-        ADD COLUMN IF NOT EXISTS efficiency_target INTEGER DEFAULT 85;
-        """
+        # Add missing columns one by one to avoid syntax issues
+        columns_to_add = [
+            ("start_time", "TIME DEFAULT '08:00:00'"),
+            ("end_time", "TIME DEFAULT '17:00:00'"),
+            ("break_duration", "INTEGER DEFAULT 15"),
+            ("lunch_break_duration", "INTEGER DEFAULT 60"),
+            ("lunch_break_start", "TIME DEFAULT '12:00:00'"),
+            ("auto_schedule_enabled", "BOOLEAN DEFAULT true"),
+            ("maintenance_interval_days", "INTEGER DEFAULT 30"),
+            ("efficiency_target", "INTEGER DEFAULT 85")
+        ]
         
-        cursor.execute(migration_sql)
+        for column_name, column_def in columns_to_add:
+            try:
+                cursor.execute(f"ALTER TABLE production_lines ADD COLUMN IF NOT EXISTS {column_name} {column_def}")
+                print(f"Added column: {column_name}")
+            except Exception as e:
+                print(f"Column {column_name} might already exist: {e}")
+        
+        conn.commit()
         
         # Update existing records with defaults
         update_sql = """
