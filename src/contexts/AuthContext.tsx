@@ -55,11 +55,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         setUser(data.user);
       } else {
         // Token is invalid, remove it
+        console.log('Token expired, removing from localStorage');
         localStorage.removeItem('auth_token');
+        setUser(null);
       }
     } catch (error) {
       console.error('Error fetching current user:', error);
       localStorage.removeItem('auth_token');
+      setUser(null);
     } finally {
       setIsLoading(false);
     }

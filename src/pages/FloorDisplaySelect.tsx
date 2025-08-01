@@ -34,7 +34,13 @@ const FloorDisplaySelect: React.FC = () => {
       const baseUrl = process.env.NODE_ENV === 'production' 
         ? window.location.origin 
         : 'https://smtdatabase01-production.up.railway.app';
-      const response = await fetch(`${baseUrl}/api/production-lines`);
+      const token = localStorage.getItem('auth_token');
+      const response = await fetch(`${baseUrl}/api/production-lines`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
       
       console.log('Response status:', response.status);
       

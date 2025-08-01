@@ -600,76 +600,106 @@ def create_user():
             'timestamp': datetime.now().isoformat()
         }), 500
 
-@app.route('/api/work-orders')
+@app.route('/api/work-orders', methods=['GET'])
+@require_auth(['admin', 'scheduler', 'supervisor', 'floor_view', 'viewer'])
 def get_work_orders():
-    """Get all work orders"""
+    """Get all work orders with optional filtering"""
     try:
-        connection = psycopg2.connect(os.getenv('DATABASE_URL'))
-        cursor = connection.cursor()
+        # Get query parameters
+        status = request.args.get('status')
+        customer_id = request.args.get('customer_id')
+        line_id = request.args.get('line_id')
+        clear_to_build = request.args.get('clear_to_build')  # New filter parameter
         
-        cursor.execute("""
+        # Build the query
+        query = """
             SELECT 
-                wo.work_order_number,
-                c.name as customer_name,
-                a.assembly_number,
-                a.revision,
-                wo.quantity,
-                wo.status,
-                wo.kit_date,
-                wo.ship_date,
-                wo.setup_hours_estimated,
-                wo.production_time_minutes_estimated,
-                wo.production_time_hours_estimated,
-                wo.production_time_days_estimated,
-                wo.trolley_number,
-                pl.line_name,
-                wo.line_position,
-                wo.created_at,
-                wo.updated_at
+                wo.id, wo.work_order_number, wo.quantity, wo.status, wo.clear_to_build,
+                wo.kit_date, wo.ship_date, wo.setup_hours_estimated, 
+                wo.production_time_hours_estimated, wo.production_time_days_estimated,
+                wo.setup_hours_actual, wo.production_time_hours_actual, wo.production_time_days_actual,
+                wo.completion_date, wo.trolley_number, wo.line_id, wo.line_position,
+                wo.scheduled_start_time, wo.scheduled_end_time, wo.is_hand_placed,
+                wo.created_at, wo.updated_at,
+                a.assembly_number, a.revision, a.description,
+                c.name as customer_name, c.id as customer_id,
+                pl.line_name, pl.line_type
             FROM work_orders wo
             JOIN assemblies a ON wo.assembly_id = a.id
             JOIN customers c ON a.customer_id = c.id
             LEFT JOIN production_lines pl ON wo.line_id = pl.id
-            ORDER BY wo.created_at DESC
-        """)
+            WHERE 1=1
+        """
+        params = []
+        
+        if status:
+            query += " AND wo.status = %s"
+            params.append(status)
+        
+        if customer_id:
+            query += " AND c.id = %s"
+            params.append(customer_id)
+            
+        if line_id:
+            query += " AND wo.line_id = %s"
+            params.append(line_id)
+            
+        if clear_to_build is not None:  # New filter
+            query += " AND wo.clear_to_build = %s"
+            params.append(clear_to_build.lower() == 'true')
+        
+        query += " ORDER BY wo.ship_date ASC, wo.work_order_number"
+        
+        conn = get_database_connection()
+        cursor = conn.cursor()
+        cursor.execute(query, params)
         
         work_orders = []
         for row in cursor.fetchall():
-            work_orders.append({
-                'work_order_number': row[0],
-                'customer_name': row[1],
-                'assembly_number': row[2],
-                'revision': row[3],
-                'quantity': row[4],
-                'status': row[5],
-                'kit_date': row[6].isoformat() if row[6] else None,
-                'ship_date': row[7].isoformat() if row[7] else None,
-                'setup_hours_estimated': float(row[8]) if row[8] else None,
-                'production_time_minutes_estimated': float(row[9]) if row[9] else None,
-                'production_time_hours_estimated': float(row[10]) if row[10] else None,
-                'production_time_days_estimated': float(row[11]) if row[11] else None,
-                'trolley_number': row[12],
-                'line_name': row[13],
-                'line_position': row[14],
-                'created_at': row[15].isoformat(),
-                'updated_at': row[16].isoformat()
-            })
+            work_order = {
+                'id': row[0],
+                'work_order_number': row[1],
+                'quantity': row[2],
+                'status': row[3],
+                'clear_to_build': row[4],
+                'kit_date': row[5].isoformat() if row[5] else None,
+                'ship_date': row[6].isoformat() if row[6] else None,
+                'setup_hours_estimated': float(row[7]) if row[7] else None,
+                'production_time_hours_estimated': float(row[8]) if row[8] else None,
+                'production_time_days_estimated': float(row[9]) if row[9] else None,
+                'setup_hours_actual': float(row[10]) if row[10] else None,
+                'production_time_hours_actual': float(row[11]) if row[11] else None,
+                'production_time_days_actual': float(row[12]) if row[12] else None,
+                'completion_date': row[13].isoformat() if row[13] else None,
+                'trolley_number': row[14],
+                'line_id': row[15],
+                'line_position': row[16],
+                'scheduled_start_time': row[17].isoformat() if row[17] else None,
+                'scheduled_end_time': row[18].isoformat() if row[18] else None,
+                'is_hand_placed': row[19],
+                'created_at': row[20].isoformat() if row[20] else None,
+                'updated_at': row[21].isoformat() if row[21] else None,
+                'assembly_number': row[22],
+                'revision': row[23],
+                'description': row[24],
+                'customer_name': row[25],
+                'customer_id': row[26],
+                'line_name': row[27],
+                'line_type': row[28]
+            }
+            work_orders.append(work_order)
         
         cursor.close()
-        connection.close()
+        conn.close()
         
         return jsonify({
             'work_orders': work_orders,
-            'total_count': len(work_orders),
-            'timestamp': datetime.now().isoformat()
-        }), 200
+            'total': len(work_orders)
+        })
         
     except Exception as e:
-        logger.error(f"Error fetching work orders: {e}")
-        return jsonify({
-            'error': str(e),
-            'timestamp': datetime.now().isoformat()
-        }), 500
+        app.logger.error(f"Error fetching work orders: {str(e)}")
+        return jsonify({'error': 'Failed to fetch work orders'}), 500
 
 @app.route('/api/customers')
 def get_customers():
@@ -710,76 +740,203 @@ def get_customers():
             'timestamp': datetime.now().isoformat()
         }), 500
 
-@app.route('/api/production-lines')
-def get_production_lines():
-    """Get all production lines"""
+
+
+@app.route('/api/production-lines/<line_id>/config', methods=['PUT', 'OPTIONS'])
+def update_line_config(line_id):
+    """Update production line configuration"""
+    
+    # Handle CORS preflight request
+    if request.method == 'OPTIONS':
+        response = jsonify({'message': 'CORS preflight'})
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With')
+        response.headers.add('Access-Control-Allow-Methods', 'PUT,OPTIONS')
+        response.headers.add('Access-Control-Max-Age', '86400')
+        return response
+    
+    # Check authentication for non-OPTIONS requests
+    token = request.headers.get('Authorization')
+    if not token or not token.startswith('Bearer '):
+        return add_cors_headers(jsonify({'error': 'Missing or invalid authorization token'})), 401
+    
     try:
-        connection = psycopg2.connect(os.getenv('DATABASE_URL'))
+        token_data = decode_jwt_token(token.split(' ')[1])
+        if not token_data or token_data.get('role') not in ['admin', 'scheduler']:
+            return add_cors_headers(jsonify({'error': 'Insufficient permissions'})), 403
+    except Exception as e:
+        return add_cors_headers(jsonify({'error': 'Invalid token'})), 401
+    
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return add_cors_headers(jsonify({'error': 'No data provided'})), 400
+        
+        conn = get_database_connection()
+        cursor = conn.cursor()
+        
+        # Build dynamic update query
+        update_fields = []
+        params = []
+        
+        # Work hours configuration - only update if provided
+        if 'hours_per_shift' in data:
+            update_fields.append('hours_per_shift = %s')
+            params.append(data['hours_per_shift'])
+        
+        if 'shifts_per_day' in data:
+            update_fields.append('shifts_per_day = %s')
+            params.append(data['shifts_per_day'])
+        
+        if 'days_per_week' in data:
+            update_fields.append('days_per_week = %s')
+            params.append(data['days_per_week'])
+        
+        if 'time_multiplier' in data:
+            update_fields.append('time_multiplier = %s')
+            params.append(data['time_multiplier'])
+        
+        # New work hours fields - only update if provided
+        if 'start_time' in data:
+            update_fields.append('start_time = %s')
+            params.append(data['start_time'])
+        
+        if 'end_time' in data:
+            update_fields.append('end_time = %s')
+            params.append(data['end_time'])
+        
+        if 'lunch_break_duration' in data:
+            update_fields.append('lunch_break_duration = %s')
+            params.append(data['lunch_break_duration'])
+        
+        if 'lunch_break_start' in data:
+            update_fields.append('lunch_break_start = %s')
+            params.append(data['lunch_break_start'])
+        
+        if 'break_duration' in data:
+            update_fields.append('break_duration = %s')
+            params.append(data['break_duration'])
+        
+        if not update_fields:
+            return add_cors_headers(jsonify({'error': 'No valid fields to update'})), 400
+        
+        # Add line_id and updated_at to params
+        params.append(line_id)
+        
+        # Execute update
+        query = f"""
+            UPDATE production_lines 
+            SET {', '.join(update_fields)}, updated_at = NOW()
+            WHERE id = %s
+            RETURNING id, line_name, hours_per_shift, shifts_per_day, days_per_week, time_multiplier
+        """
+        
+        cursor.execute(query, params)
+        result = cursor.fetchone()
+        
+        if not result:
+            cursor.close()
+            conn.close()
+            return add_cors_headers(jsonify({'error': 'Production line not found'})), 404
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        return add_cors_headers(jsonify({
+            'message': 'Line configuration updated successfully',
+            'line_id': result[0],
+            'line_name': result[1],
+            'hours_per_shift': result[2],
+            'shifts_per_day': result[3],
+            'days_per_week': result[4],
+            'time_multiplier': float(result[5]) if result[5] else 1.0
+        }))
+        
+    except Exception as e:
+        app.logger.error(f"Error updating line config: {str(e)}")
+        return add_cors_headers(jsonify({'error': 'Failed to update line configuration'})), 500
+
+@app.route('/api/production-lines/<line_id>/status', methods=['PUT', 'OPTIONS'])
+@require_auth(['admin', 'supervisor'])
+def update_line_status(line_id):
+    """Update production line status"""
+    
+    # Handle CORS preflight request
+    if request.method == 'OPTIONS':
+        response = jsonify({'message': 'CORS preflight'})
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With')
+        response.headers.add('Access-Control-Allow-Methods', 'PUT,OPTIONS')
+        response.headers.add('Access-Control-Max-Age', '86400')
+        return response
+    
+    try:
+        data = request.get_json()
+        if not data or 'status' not in data:
+            response = jsonify({'error': 'Status field required'})
+            return add_cors_headers(response), 400
+        
+        valid_statuses = ['running', 'idle', 'maintenance', 'down']
+        if data['status'] not in valid_statuses:
+            response = jsonify({'error': f'Invalid status. Must be one of: {", ".join(valid_statuses)}'})
+            return add_cors_headers(response), 400
+        
+        connection = get_database_connection()
+        if not connection:
+            response = jsonify({'error': 'Database connection failed'})
+            return add_cors_headers(response), 500
+        
         cursor = connection.cursor()
         
+        # Update line status
         cursor.execute("""
-            SELECT id, line_name, time_multiplier, active, shifts_per_day, 
-                   hours_per_shift, days_per_week, created_at, updated_at
-            FROM production_lines
-            ORDER BY line_name
-        """)
+            UPDATE production_lines 
+            SET status = %s, updated_at = NOW() 
+            WHERE id = %s
+        """, (data['status'], line_id))
         
-        lines = []
-        for row in cursor.fetchall():
-            lines.append({
-                'id': row[0],
-                'line_name': row[1],
-                'time_multiplier': float(row[2]) if row[2] else 1.0,
-                'active': row[3],
-                'shifts_per_day': row[4],
-                'hours_per_shift': row[5],
-                'days_per_week': row[6],
-                'created_at': row[7].isoformat(),
-                'updated_at': row[8].isoformat()
-            })
+        if cursor.rowcount == 0:
+            cursor.close()
+            connection.close()
+            response = jsonify({'error': 'Production line not found'})
+            return add_cors_headers(response), 404
         
+        connection.commit()
         cursor.close()
         connection.close()
         
-        return jsonify({
-            'production_lines': lines,
-            'total_count': len(lines),
+        response = jsonify({
+            'message': 'Line status updated successfully',
+            'line_id': line_id,
+            'status': data['status'],
             'timestamp': datetime.now().isoformat()
-        }), 200
+        })
+        return add_cors_headers(response), 200
         
     except Exception as e:
-        logger.error(f"Error fetching production lines: {e}")
-        return jsonify({
-            'error': str(e),
+        logger.error(f"Line status update error: {e}")
+        response = jsonify({
+            'error': 'Line status update failed',
+            'details': str(e),
             'timestamp': datetime.now().isoformat()
-        }), 500
+        })
+        return add_cors_headers(response), 500
 
-@app.route('/api/schedule/timeline')
+@app.route('/api/schedule/timeline', methods=['GET'])
+@require_auth(['admin', 'scheduler', 'supervisor', 'floor_view', 'viewer'])
 def get_schedule_timeline():
-    """Get timeline view of all work orders organized by production lines"""
+    """Get timeline data for scheduling"""
     try:
-        connection = psycopg2.connect(os.getenv('DATABASE_URL'))
-        cursor = connection.cursor()
+        conn = get_database_connection()
+        cursor = conn.cursor()
         
-        # Ensure line_number column exists and add missing line numbers
-        try:
-            cursor.execute("ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS line_number INTEGER")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_work_orders_qr_lookup ON work_orders(work_order_number, line_number)")
-            cursor.execute("UPDATE work_orders SET line_number = FLOOR(RANDOM() * 5) + 1 WHERE line_number IS NULL")
-            connection.commit()
-        except Exception as e:
-            logger.warning(f"Line number setup warning (normal if already exists): {e}")
-            connection.rollback()
-        
-        # Use the same query structure as /api/work-orders (which works)
         cursor.execute("""
             SELECT 
                 wo.id,
                 wo.work_order_number,
-                wo.line_number,
-                c.name as customer_name,
-                a.assembly_number,
-                a.revision,
+                wo.assembly_id,
                 wo.quantity,
                 wo.status,
                 wo.kit_date,
@@ -788,89 +945,81 @@ def get_schedule_timeline():
                 wo.production_time_minutes_estimated,
                 wo.production_time_hours_estimated,
                 wo.production_time_days_estimated,
+                wo.setup_hours_actual,
+                wo.production_time_minutes_actual,
+                wo.production_time_hours_actual,
+                wo.production_time_days_actual,
+                wo.completion_date,
                 wo.trolley_number,
-                pl.line_name,
+                wo.line_id,
                 wo.line_position,
+                wo.is_hand_placed,
                 wo.created_at,
-                wo.updated_at
+                wo.updated_at,
+                wo.line_number,
+                pl.line_name,
+                pl.line_type,
+                pl.status as line_status,
+                pl.current_utilization,
+                pl.available_capacity
             FROM work_orders wo
-            JOIN assemblies a ON wo.assembly_id = a.id
-            JOIN customers c ON a.customer_id = c.id
             LEFT JOIN production_lines pl ON wo.line_id = pl.id
-            WHERE wo.status NOT IN ('Completed', 'Cancelled')
-            ORDER BY pl.line_name NULLS LAST, wo.line_position NULLS LAST
+            ORDER BY wo.kit_date ASC, wo.work_order_number ASC
         """)
         
         work_orders = []
         for row in cursor.fetchall():
-            # Calculate total duration in hours (indices shifted due to line_number)
-            setup_hours = float(row[10]) if row[10] else 0.0
-            prod_minutes = float(row[11]) if row[11] else 0.0
-            prod_hours = float(row[12]) if row[12] else 0.0
-            prod_days = float(row[13]) if row[13] else 0.0
+            # Ensure line_number is not NULL
+            line_number = row[22] if row[22] is not None else 1
             
-            total_hours = setup_hours + (prod_minutes / 60.0) + prod_hours + (prod_days * 8.0)
+            # Generate QR code
+            qr_code = f"{row[1]}-{line_number}"
             
-            # Extract work order line number and generate QR code
-            work_order_number = row[1]  # Full work order number like "14966.2"
-            line_number = row[2]  # existing line_number from database
-            
-            # If line_number is not set, assign 1 (most work orders are line 1, displayed as -1 in QR)
-            if line_number is None:
-                line_number = 1  # Default to line 1 for work orders
-                # Update the database with the default line_number
-                try:
-                    cursor.execute("""
-                        UPDATE work_orders 
-                        SET line_number = %s, updated_at = NOW()
-                        WHERE id = %s
-                    """, (line_number, row[0]))
-                    connection.commit()
-                    logger.info(f"Set default line_number {line_number} for work order {work_order_number}")
-                except Exception as e:
-                    logger.warning(f"Could not set default line_number: {e}")
-                    line_number = 1  # fallback
-            
-            # Generate QR code in format: work_order_number-line_number (display as -1, -2, etc.)
-            qr_code = f"{work_order_number}-{line_number}"
-            
-            work_orders.append({
+            work_order = {
                 'id': row[0],
                 'work_order_number': row[1],
+                'assembly_id': row[2],
+                'quantity': row[3],
+                'status': row[4],
+                'kit_date': row[5].isoformat() if row[5] else None,
+                'ship_date': row[6].isoformat() if row[6] else None,
+                'setup_hours_estimated': float(row[7]) if row[7] else 0.0,
+                'production_time_minutes_estimated': float(row[8]) if row[8] else 0.0,
+                'production_time_hours_estimated': float(row[9]) if row[9] else 0.0,
+                'production_time_days_estimated': float(row[10]) if row[10] else 0.0,
+                'setup_hours_actual': float(row[11]) if row[11] else 0.0,
+                'production_time_minutes_actual': float(row[12]) if row[12] else 0.0,
+                'production_time_hours_actual': float(row[13]) if row[13] else 0.0,
+                'production_time_days_actual': float(row[14]) if row[14] else 0.0,
+                'completion_date': row[15].isoformat() if row[15] else None,
+                'trolley_number': row[16],
+                'line_id': row[17],
+                'line_position': row[18],
+                'is_hand_placed': row[19],
+                'created_at': row[20].isoformat() if row[20] else None,
+                'updated_at': row[21].isoformat() if row[21] else None,
                 'line_number': line_number,
                 'qr_code': qr_code,
-                'customer_name': row[3],
-                'assembly_number': row[4],
-                'revision': row[5],
-                'quantity': row[6],
-                'status': row[7],
-                'kit_date': row[8].isoformat() if row[8] else None,
-                'ship_date': row[9].isoformat() if row[9] else None,
-                'setup_hours_estimated': setup_hours,
-                'production_hours_estimated': prod_hours,
-                'total_duration_hours': total_hours,
-                'trolley_number': row[14],
-                'line_name': row[15],
-                'line_position': row[16],
-                'scheduled_start_time': None,  # Not yet implemented
-                'scheduled_end_time': None,    # Not yet implemented
-            })
+                'line_name': row[23],
+                'line_type': row[24],
+                'line_status': row[25],
+                'current_utilization': float(row[26]) if row[26] else 0.0,
+                'available_capacity': row[27],
+                'clear_to_build': True  # Default value since column doesn't exist
+            }
+            work_orders.append(work_order)
+        
+        cursor.close()
+        conn.close()
         
         return jsonify({
-            'timeline': work_orders,
-            'work_orders': work_orders,  # For compatibility
-            'timestamp': datetime.now().isoformat()
+            'work_orders': work_orders,
+            'total': len(work_orders)
         })
         
     except Exception as e:
-        logger.error(f"Timeline error: {e}")
-        return jsonify({
-            'error': str(e),
-            'timestamp': datetime.now().isoformat()
-        }), 500
-    finally:
-        if connection:
-            connection.close()
+        app.logger.error(f"Timeline error: {str(e)}")
+        return jsonify({'error': 'Failed to fetch timeline data'}), 500
 
 @app.route('/api/schedule/line/<line_id>')
 def get_line_schedule(line_id):
@@ -1444,8 +1593,9 @@ def timeline_update_work_order_status(work_order_id):
     if request.method == 'OPTIONS':
         response = jsonify({'message': 'CORS preflight'})
         response.headers.add('Access-Control-Allow-Origin', '*')
-        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With')
         response.headers.add('Access-Control-Allow-Methods', 'PUT,OPTIONS')
+        response.headers.add('Access-Control-Max-Age', '86400')  # 24 hours
         return response
     
     # Require authentication for PUT requests
@@ -1459,21 +1609,18 @@ def timeline_update_work_order_status(work_order_id):
     
     if not token:
         response = jsonify({'error': 'Authentication token required'})
-        response.headers.add('Access-Control-Allow-Origin', '*')
-        return response, 401
+        return add_cors_headers(response), 401
     
     payload = decode_jwt_token(token)
     if not payload:
         response = jsonify({'error': 'Invalid or expired token'})
-        response.headers.add('Access-Control-Allow-Origin', '*')
-        return response, 401
+        return add_cors_headers(response), 401
     
     # Check role permissions
     required_roles = ['admin', 'scheduler', 'supervisor']
     if payload.get('role') not in required_roles:
         response = jsonify({'error': 'Insufficient permissions'})
-        response.headers.add('Access-Control-Allow-Origin', '*')
-        return response, 403
+        return add_cors_headers(response), 403
     
     # Add user info to request context
     request.current_user = {
@@ -1486,8 +1633,7 @@ def timeline_update_work_order_status(work_order_id):
         data = request.get_json()
         if not data or not data.get('status'):
             response = jsonify({'error': 'Status is required'})
-            response.headers.add('Access-Control-Allow-Origin', '*')
-            return response, 400
+            return add_cors_headers(response), 400
         
         new_status = data['status'].strip()
         updated_by = request.current_user['username']
@@ -1503,14 +1649,12 @@ def timeline_update_work_order_status(work_order_id):
             response = jsonify({
                 'error': f'Invalid status. Valid options: {", ".join(valid_statuses)}'
             })
-            response.headers.add('Access-Control-Allow-Origin', '*')
-            return response, 400
+            return add_cors_headers(response), 400
         
         connection = get_database_connection()
         if not connection:
             response = jsonify({'error': 'Database connection failed'})
-            response.headers.add('Access-Control-Allow-Origin', '*')
-            return response, 500
+            return add_cors_headers(response), 500
         
         try:
             cursor = connection.cursor()
@@ -1529,8 +1673,7 @@ def timeline_update_work_order_status(work_order_id):
                 cursor.close()
                 connection.close()
                 response = jsonify({'error': 'Work order not found'})
-                response.headers.add('Access-Control-Allow-Origin', '*')
-                return response, 404
+                return add_cors_headers(response), 404
             
             old_status = work_order[1]
             
@@ -1544,8 +1687,7 @@ def timeline_update_work_order_status(work_order_id):
                     'status': new_status,
                     'timestamp': datetime.now().isoformat()
                 })
-                response.headers.add('Access-Control-Allow-Origin', '*')
-                return response, 200
+                return add_cors_headers(response), 200
             
             # Update work order status
             cursor.execute("""
@@ -1556,10 +1698,10 @@ def timeline_update_work_order_status(work_order_id):
             
             # Create status history record
             cursor.execute("""
-                INSERT INTO work_order_status_history 
-                (work_order_id, old_status, new_status, changed_by, notes, changed_at)
+                INSERT INTO work_order_history 
+                (work_order_id, user_id, field_name, old_value, new_value, changed_at)
                 VALUES (%s, %s, %s, %s, %s, NOW())
-            """, (work_order_id, old_status, new_status, updated_by, 'Updated from Timeline View'))
+            """, (work_order_id, request.current_user['user_id'], 'status', old_status, new_status))
             
             connection.commit()
             cursor.close()
@@ -1590,8 +1732,7 @@ def timeline_update_work_order_status(work_order_id):
                 'broadcast': 'sent',
                 'timestamp': datetime.now().isoformat()
             })
-            response.headers.add('Access-Control-Allow-Origin', '*')
-            return response, 200
+            return add_cors_headers(response), 200
             
         except Exception as db_error:
             logger.error(f"Database error in timeline status update: {db_error}")
@@ -1602,8 +1743,7 @@ def timeline_update_work_order_status(work_order_id):
                 'error': f'Database operation failed: {str(db_error)}',
                 'timestamp': datetime.now().isoformat()
             })
-            response.headers.add('Access-Control-Allow-Origin', '*')
-            return response, 500
+            return add_cors_headers(response), 500
         
     except Exception as e:
         logger.error(f"Timeline status update error: {e}")
@@ -1612,8 +1752,112 @@ def timeline_update_work_order_status(work_order_id):
             'details': str(e),
             'timestamp': datetime.now().isoformat()
         })
+        return add_cors_headers(response), 500
+
+@app.route('/api/schedule/work-orders/<work_order_id>', methods=['PUT', 'OPTIONS'])
+@require_auth(['admin', 'scheduler', 'supervisor'])
+def update_work_order_schedule(work_order_id):
+    """Update work order scheduling information"""
+    
+    # Handle CORS preflight request
+    if request.method == 'OPTIONS':
+        response = jsonify({'message': 'CORS preflight'})
         response.headers.add('Access-Control-Allow-Origin', '*')
-        return response, 500
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With')
+        response.headers.add('Access-Control-Allow-Methods', 'PUT,OPTIONS')
+        response.headers.add('Access-Control-Max-Age', '86400')
+        return response
+    
+    try:
+        data = request.get_json()
+        if not data:
+            response = jsonify({'error': 'No data provided'})
+            return add_cors_headers(response), 400
+        
+        connection = get_database_connection()
+        if not connection:
+            response = jsonify({'error': 'Database connection failed'})
+            return add_cors_headers(response), 500
+        
+        cursor = connection.cursor()
+        
+        # Get current work order
+        cursor.execute("""
+            SELECT wo.work_order_number, wo.status, c.name, a.assembly_number, wo.line_number
+            FROM work_orders wo
+            JOIN assemblies a ON wo.assembly_id = a.id
+            JOIN customers c ON a.customer_id = c.id
+            WHERE wo.id = %s
+        """, (work_order_id,))
+        
+        work_order = cursor.fetchone()
+        if not work_order:
+            cursor.close()
+            connection.close()
+            response = jsonify({'error': 'Work order not found'})
+            return add_cors_headers(response), 404
+        
+        # Build update query dynamically based on provided data
+        update_fields = []
+        update_values = []
+        
+        if 'line_id' in data:
+            update_fields.append('line_id = %s')
+            update_values.append(data['line_id'])
+        
+        if 'scheduled_start_time' in data:
+            update_fields.append('scheduled_start_time = %s')
+            update_values.append(data['scheduled_start_time'])
+        
+        if 'scheduled_end_time' in data:
+            update_fields.append('scheduled_end_time = %s')
+            update_values.append(data['scheduled_end_time'])
+        
+        if 'line_position' in data:
+            update_fields.append('line_position = %s')
+            update_values.append(data['line_position'])
+        
+        if not update_fields:
+            response = jsonify({'error': 'No valid fields to update'})
+            return add_cors_headers(response), 400
+        
+        # Add updated_at timestamp
+        update_fields.append('updated_at = NOW()')
+        
+        # Execute update
+        update_query = f"UPDATE work_orders SET {', '.join(update_fields)} WHERE id = %s"
+        update_values.append(work_order_id)
+        
+        cursor.execute(update_query, update_values)
+        connection.commit()
+        
+        # Log the change
+        cursor.execute("""
+            INSERT INTO work_order_history 
+            (work_order_id, user_id, field_name, old_value, new_value, changed_at)
+            VALUES (%s, %s, %s, %s, %s, NOW())
+        """, (work_order_id, request.current_user['user_id'], 'schedule', 'updated', 'schedule_updated'))
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        response = jsonify({
+            'message': 'Schedule updated successfully',
+            'work_order_number': work_order[0],
+            'updated_fields': list(data.keys()),
+            'timestamp': datetime.now().isoformat()
+        })
+        return add_cors_headers(response), 200
+        
+    except Exception as e:
+        logger.error(f"Schedule update error: {e}")
+        response = jsonify({
+            'error': 'Schedule update failed',
+            'details': str(e),
+            'timestamp': datetime.now().isoformat()
+        })
+        return add_cors_headers(response), 500
 
 @app.route('/api/mobile/qr/<qr_code>')
 @require_auth(['admin', 'scheduler', 'supervisor', 'floor_view'])
@@ -1694,9 +1938,9 @@ def mobile_qr_lookup(qr_code):
         
         # Get recent status history
         cursor.execute("""
-            SELECT old_status, new_status, changed_by, notes, changed_at
-            FROM work_order_status_history
-            WHERE work_order_id = %s
+            SELECT field_name, old_value, new_value, changed_at
+            FROM work_order_history
+            WHERE work_order_id = %s AND field_name = 'status'
             ORDER BY changed_at DESC
             LIMIT 10
         """, (work_order[0],))
@@ -1704,11 +1948,10 @@ def mobile_qr_lookup(qr_code):
         status_history = []
         for row in cursor.fetchall():
             status_history.append({
-                'old_status': row[0],
-                'new_status': row[1],
-                'changed_by': row[2],
-                'notes': row[3],
-                'changed_at': row[4].isoformat()
+                'field_name': row[0],
+                'old_status': row[1],
+                'new_status': row[2],
+                'changed_at': row[3].isoformat()
             })
         
         cursor.close()
@@ -1861,6 +2104,13 @@ def get_user_from_token(token):
         }
     except jwt.InvalidTokenError:
         return None
+
+def add_cors_headers(response):
+    """Add CORS headers to response"""
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS')
+    return response
 
 def add_user_to_room(sid, room, user_info):
     """Add user to room with tracking"""
@@ -2202,6 +2452,265 @@ def add_line_numbers():
             'error': str(e),
             'timestamp': datetime.now().isoformat()
         }), 500
+
+@app.route('/api/work-orders/<work_order_id>/clear-to-build', methods=['PUT', 'OPTIONS'])
+@require_auth(['admin', 'scheduler', 'supervisor'])
+def update_clear_to_build(work_order_id):
+    """Update work order clear to build status"""
+    
+    # Handle CORS preflight request
+    if request.method == 'OPTIONS':
+        response = jsonify({'message': 'CORS preflight'})
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With')
+        response.headers.add('Access-Control-Allow-Methods', 'PUT,OPTIONS')
+        response.headers.add('Access-Control-Max-Age', '86400')
+        return response
+    
+    try:
+        data = request.get_json()
+        clear_to_build = data.get('clear_to_build')
+        
+        if clear_to_build is None:
+            return add_cors_headers(jsonify({'error': 'clear_to_build field is required'})), 400
+        
+        if not isinstance(clear_to_build, bool):
+            return add_cors_headers(jsonify({'error': 'clear_to_build must be a boolean'})), 400
+        
+        conn = get_database_connection()
+        cursor = conn.cursor()
+        
+        # Update the clear_to_build status
+        cursor.execute("""
+            UPDATE work_orders 
+            SET clear_to_build = %s, updated_at = NOW()
+            WHERE id = %s
+            RETURNING id, work_order_number, clear_to_build
+        """, (clear_to_build, work_order_id))
+        
+        result = cursor.fetchone()
+        if not result:
+            cursor.close()
+            conn.close()
+            return add_cors_headers(jsonify({'error': 'Work order not found'})), 404
+        
+        # Log the change
+        cursor.execute("""
+            INSERT INTO work_order_history (work_order_id, field_name, old_value, new_value, changed_at)
+            VALUES (%s, 'clear_to_build', %s, %s, NOW())
+        """, (work_order_id, str(not clear_to_build), str(clear_to_build)))
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        return add_cors_headers(jsonify({
+            'message': 'Clear to build status updated successfully',
+            'work_order_id': work_order_id,
+            'work_order_number': result[1],
+            'clear_to_build': result[2]
+        }))
+        
+    except Exception as e:
+        app.logger.error(f"Error updating clear to build status: {str(e)}")
+        return add_cors_headers(jsonify({'error': 'Failed to update clear to build status'})), 500
+
+@app.route('/api/init-production-lines', methods=['POST'])
+@require_auth(['admin'])
+def init_production_lines():
+    """Initialize default production lines"""
+    try:
+        conn = get_database_connection()
+        cursor = conn.cursor()
+        
+        # Check if production lines already exist
+        cursor.execute("SELECT COUNT(*) FROM production_lines")
+        count = cursor.fetchone()[0]
+        
+        if count > 0:
+            return jsonify({'message': f'Production lines already exist ({count} lines)'}), 200
+        
+        # Insert default production lines
+        default_lines = [
+            ('Line 1', 'SMT', 'Main Floor', 2.0, 'idle', 1, 8, 5, '08:00:00', '17:00:00', 60, '12:00:00', 15),
+            ('Line 2', 'SMT', 'Main Floor', 1.0, 'idle', 1, 8, 5, '08:00:00', '17:00:00', 60, '12:00:00', 15),
+            ('Line 3', 'SMT', 'Main Floor', 1.0, 'idle', 1, 8, 5, '08:00:00', '17:00:00', 60, '12:00:00', 15),
+            ('Hand Placement 1', 'Hand Placement', 'Assembly Area', 1.0, 'idle', 1, 8, 5, '08:00:00', '17:00:00', 60, '12:00:00', 15),
+            ('Hand Placement 2', 'Hand Placement', 'Assembly Area', 1.0, 'idle', 1, 8, 5, '08:00:00', '17:00:00', 60, '12:00:00', 15)
+        ]
+        
+        for line in default_lines:
+            cursor.execute("""
+                INSERT INTO production_lines 
+                (line_name, line_type, location_area, time_multiplier, status, 
+                 shifts_per_day, hours_per_shift, days_per_week, start_time, end_time,
+                 lunch_break_duration, lunch_break_start, break_duration)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, line)
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        return jsonify({
+            'message': 'Default production lines created successfully',
+            'lines_created': len(default_lines)
+        }), 201
+        
+    except Exception as e:
+        app.logger.error(f"Error creating production lines: {str(e)}")
+        return jsonify({'error': 'Failed to create production lines'}), 500
+
+@app.route('/api/production-lines', methods=['GET'])
+@require_auth(['admin', 'scheduler', 'supervisor', 'floor_view', 'viewer'])
+def get_production_lines():
+    """Get all production lines"""
+    try:
+        conn = get_database_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT id, line_name, line_type, status, current_utilization, 
+                   available_capacity, active, shifts_per_day, hours_per_shift, 
+                   days_per_week, time_multiplier, lunch_break_start,
+                   lunch_break_duration, skill_level_required,
+                   created_at, updated_at
+            FROM production_lines
+            ORDER BY line_name
+        """)
+        
+        production_lines = []
+        for row in cursor.fetchall():
+            production_line = {
+                'id': row[0],
+                'line_name': row[1],
+                'line_type': row[2],
+                'status': row[3],
+                'current_utilization': float(row[4]) if row[4] else 0.0,
+                'available_capacity': row[5],
+                'active': row[6],
+                'shifts_per_day': row[7],
+                'hours_per_shift': row[8],
+                'days_per_week': row[9],
+                'time_multiplier': float(row[10]) if row[10] else 1.0,
+                'start_time': '08:00:00',  # Default value since column doesn't exist
+                'end_time': '17:00:00',    # Default value since column doesn't exist
+                'lunch_break_duration': row[12],
+                'lunch_break_start': str(row[11]) if row[11] else '12:00:00',
+                'break_duration': 15,  # Default value since column doesn't exist
+                'created_at': row[14].isoformat() if row[14] else None,
+                'updated_at': row[15].isoformat() if row[15] else None
+            }
+            production_lines.append(production_line)
+        
+        cursor.close()
+        conn.close()
+        
+        return jsonify({
+            'production_lines': production_lines,
+            'total': len(production_lines)
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error fetching production lines: {str(e)}")
+        return jsonify({'error': 'Failed to fetch production lines'}), 500
+
+@app.route('/api/test-production-lines', methods=['GET'])
+@require_auth(['admin'])
+def test_production_lines():
+    """Test endpoint to check production lines table structure"""
+    try:
+        conn = get_database_connection()
+        cursor = conn.cursor()
+        
+        # Check table structure
+        cursor.execute("""
+            SELECT column_name, data_type 
+            FROM information_schema.columns 
+            WHERE table_name = 'production_lines' 
+            ORDER BY ordinal_position
+        """)
+        
+        columns = cursor.fetchall()
+        
+        # Try a simple count query
+        cursor.execute("SELECT COUNT(*) FROM production_lines")
+        count = cursor.fetchone()[0]
+        
+        # Try to get one row
+        cursor.execute("SELECT * FROM production_lines LIMIT 1")
+        sample_row = cursor.fetchone()
+        
+        # Convert sample row to serializable format
+        serializable_row = None
+        if sample_row:
+            serializable_row = []
+            for item in sample_row:
+                if hasattr(item, 'isoformat'):  # datetime, date, time objects
+                    serializable_row.append(item.isoformat())
+                elif hasattr(item, 'strftime'):  # time objects
+                    serializable_row.append(str(item))
+                else:
+                    serializable_row.append(item)
+        
+        cursor.close()
+        conn.close()
+        
+        return jsonify({
+            'table_structure': [{'column': col[0], 'type': col[1]} for col in columns],
+            'total_rows': count,
+            'sample_row': serializable_row
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'error': str(e),
+            'error_type': type(e).__name__
+        }), 500
+
+@app.route('/api/test-work-orders', methods=['GET'])
+@require_auth(['admin', 'scheduler', 'supervisor', 'floor_view', 'viewer'])
+def test_work_orders():
+    """Test endpoint to check work_orders table structure"""
+    try:
+        conn = get_database_connection()
+        cursor = conn.cursor()
+        
+        # Get table structure
+        cursor.execute("""
+            SELECT column_name, data_type 
+            FROM information_schema.columns 
+            WHERE table_name = 'work_orders' 
+            ORDER BY ordinal_position
+        """)
+        
+        columns = []
+        for row in cursor.fetchall():
+            columns.append({
+                'column': row[0],
+                'type': row[1]
+            })
+        
+        # Get a sample row
+        cursor.execute("SELECT * FROM work_orders LIMIT 1")
+        sample_row = cursor.fetchone()
+        
+        # Get total rows
+        cursor.execute("SELECT COUNT(*) FROM work_orders")
+        total_rows = cursor.fetchone()[0]
+        
+        cursor.close()
+        conn.close()
+        
+        return jsonify({
+            'sample_row': list(sample_row) if sample_row else None,
+            'table_structure': columns,
+            'total_rows': total_rows
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error testing work_orders: {str(e)}")
+        return jsonify({'error': f'Failed to test work_orders: {str(e)}'}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))

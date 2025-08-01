@@ -170,9 +170,20 @@ const TimelineView: React.FC = () => {
       const baseUrl = process.env.NODE_ENV === 'production' 
         ? window.location.origin 
         : 'https://smtdatabase01-production.up.railway.app';
+      const token = localStorage.getItem('auth_token');
       const [timelineResponse, linesResponse] = await Promise.all([
-        fetch(`${baseUrl}/api/schedule/timeline`),
-        fetch(`${baseUrl}/api/production-lines`)
+        fetch(`${baseUrl}/api/schedule/timeline`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        }),
+        fetch(`${baseUrl}/api/production-lines`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        })
       ]);
 
       if (!timelineResponse.ok || !linesResponse.ok) {
@@ -260,9 +271,9 @@ const TimelineView: React.FC = () => {
     try {
       setStatusUpdateError(null);
       
-      const baseUrl = process.env.NODE_ENV === 'production' 
-        ? window.location.origin 
-        : 'http://localhost:5000';
+          const baseUrl = process.env.NODE_ENV === 'production' 
+        ? window.location.origin
+        : 'http://localhost:8080';
       
       const response = await fetch(`${baseUrl}/api/timeline/work-orders/${workOrderId}/status`, {
         method: 'PUT',
