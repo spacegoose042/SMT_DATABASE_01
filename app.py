@@ -2561,6 +2561,86 @@ def init_production_lines():
         app.logger.error(f"Error creating production lines: {str(e)}")
         return jsonify({'error': 'Failed to create production lines'}), 500
 
+@app.route('/api/migrate/add-work-hours-columns', methods=['POST'])
+@require_auth(['admin'])
+def migrate_add_work_hours_columns():
+    """Add missing work hours columns to production_lines table"""
+    try:
+        conn = get_database_connection()
+        cursor = conn.cursor()
+        
+        # Add missing columns
+        migration_sql = """
+        ALTER TABLE production_lines 
+        ADD COLUMN IF NOT EXISTS start_time TIME DEFAULT '08:00:00',
+        ADD COLUMN IF NOT EXISTS end_time TIME DEFAULT '17:00:00',
+        ADD COLUMN IF NOT EXISTS break_duration INTEGER DEFAULT 15,
+        ADD COLUMN IF NOT EXISTS lunch_break_duration INTEGER DEFAULT 60,
+        ADD COLUMN IF NOT EXISTS lunch_break_start TIME DEFAULT '12:00:00',
+        ADD COLUMN IF NOT EXISTS auto_schedule_enabled BOOLEAN DEFAULT true,
+        ADD COLUMN IF NOT EXISTS maintenance_interval_days INTEGER DEFAULT 30,
+        ADD COLUMN IF NOT EXISTS efficiency_target INTEGER DEFAULT 85;
+        """
+        
+        cursor.execute(migration_sql)
+        
+        # Update existing records with defaults
+        update_sql = """
+        UPDATE production_lines SET 
+            start_time = '08:00:00' WHERE start_time IS NULL,
+            end_time = '17:00:00' WHERE end_time IS NULL,
+            break_duration = 15 WHERE break_duration IS NULL,
+            lunch_break_duration = 60 WHERE lunch_break_duration IS NULL,
+            lunch_break_start = '12:00:00' WHERE lunch_break_start IS NULL,
+            auto_schedule_enabled = true WHERE auto_schedule_enabled IS NULL,
+            maintenance_interval_days = 30 WHERE maintenance_interval_days IS NULL,
+            efficiency_target = 85 WHERE efficiency_target IS NULL;
+        """
+        
+        cursor.execute(update_sql)
+        
+        # Commit changes
+        conn.commit()
+        
+        # Verify the migration
+        cursor.execute("""
+            SELECT 
+                COUNT(*) as total_production_lines,
+                COUNT(CASE WHEN start_time IS NOT NULL THEN 1 END) as lines_with_start_time,
+                COUNT(CASE WHEN end_time IS NOT NULL THEN 1 END) as lines_with_end_time,
+                COUNT(CASE WHEN break_duration IS NOT NULL THEN 1 END) as lines_with_break_duration,
+                COUNT(CASE WHEN lunch_break_duration IS NOT NULL THEN 1 END) as lines_with_lunch_break_duration,
+                COUNT(CASE WHEN lunch_break_start IS NOT NULL THEN 1 END) as lines_with_lunch_break_start,
+                COUNT(CASE WHEN auto_schedule_enabled IS NOT NULL THEN 1 END) as lines_with_auto_schedule_enabled,
+                COUNT(CASE WHEN maintenance_interval_days IS NOT NULL THEN 1 END) as lines_with_maintenance_interval_days,
+                COUNT(CASE WHEN efficiency_target IS NOT NULL THEN 1 END) as lines_with_efficiency_target
+            FROM production_lines;
+        """)
+        
+        result = cursor.fetchone()
+        
+        cursor.close()
+        conn.close()
+        
+        return jsonify({
+            'message': 'Migration completed successfully',
+            'verification': {
+                'total_production_lines': result[0],
+                'lines_with_start_time': result[1],
+                'lines_with_end_time': result[2],
+                'lines_with_break_duration': result[3],
+                'lines_with_lunch_break_duration': result[4],
+                'lines_with_lunch_break_start': result[5],
+                'lines_with_auto_schedule_enabled': result[6],
+                'lines_with_maintenance_interval_days': result[7],
+                'lines_with_efficiency_target': result[8]
+            }
+        }), 200
+        
+    except Exception as e:
+        app.logger.error(f"Error running migration: {str(e)}")
+        return jsonify({'error': f'Migration failed: {str(e)}'}), 500
+
 @app.route('/api/production-lines', methods=['GET'])
 @require_auth(['admin', 'scheduler', 'supervisor', 'floor_view', 'viewer'])
 def get_production_lines():
@@ -2574,6 +2654,8 @@ def get_production_lines():
                    available_capacity, active, shifts_per_day, hours_per_shift, 
                    days_per_week, time_multiplier, lunch_break_start,
                    lunch_break_duration, skill_level_required,
+                   start_time, end_time, break_duration, auto_schedule_enabled,
+                   maintenance_interval_days, efficiency_target,
                    created_at, updated_at
             FROM production_lines
             ORDER BY line_name
@@ -2593,13 +2675,17 @@ def get_production_lines():
                 'hours_per_shift': row[8],
                 'days_per_week': row[9],
                 'time_multiplier': float(row[10]) if row[10] else 1.0,
-                'start_time': '08:00:00',  # Default value since column doesn't exist
-                'end_time': '17:00:00',    # Default value since column doesn't exist
-                'lunch_break_duration': row[12],
                 'lunch_break_start': str(row[11]) if row[11] else '12:00:00',
-                'break_duration': 15,  # Default value since column doesn't exist
-                'created_at': row[14].isoformat() if row[14] else None,
-                'updated_at': row[15].isoformat() if row[15] else None
+                'lunch_break_duration': row[12],
+                'skill_level_required': row[13],
+                'start_time': str(row[14]) if row[14] else '08:00:00',
+                'end_time': str(row[15]) if row[15] else '17:00:00',
+                'break_duration': row[16] if row[16] else 15,
+                'auto_schedule_enabled': row[17] if row[17] is not None else True,
+                'maintenance_interval_days': row[18] if row[18] else 30,
+                'efficiency_target': row[19] if row[19] else 85,
+                'created_at': row[20].isoformat() if row[20] else None,
+                'updated_at': row[21].isoformat() if row[21] else None
             }
             production_lines.append(production_line)
         
