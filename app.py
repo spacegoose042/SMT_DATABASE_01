@@ -2587,14 +2587,14 @@ def migrate_add_work_hours_columns():
         # Update existing records with defaults
         update_sql = """
         UPDATE production_lines SET 
-            start_time = '08:00:00' WHERE start_time IS NULL,
-            end_time = '17:00:00' WHERE end_time IS NULL,
-            break_duration = 15 WHERE break_duration IS NULL,
-            lunch_break_duration = 60 WHERE lunch_break_duration IS NULL,
-            lunch_break_start = '12:00:00' WHERE lunch_break_start IS NULL,
-            auto_schedule_enabled = true WHERE auto_schedule_enabled IS NULL,
-            maintenance_interval_days = 30 WHERE maintenance_interval_days IS NULL,
-            efficiency_target = 85 WHERE efficiency_target IS NULL;
+            start_time = COALESCE(start_time, '08:00:00'),
+            end_time = COALESCE(end_time, '17:00:00'),
+            break_duration = COALESCE(break_duration, 15),
+            lunch_break_duration = COALESCE(lunch_break_duration, 60),
+            lunch_break_start = COALESCE(lunch_break_start, '12:00:00'),
+            auto_schedule_enabled = COALESCE(auto_schedule_enabled, true),
+            maintenance_interval_days = COALESCE(maintenance_interval_days, 30),
+            efficiency_target = COALESCE(efficiency_target, 85);
         """
         
         cursor.execute(update_sql)
