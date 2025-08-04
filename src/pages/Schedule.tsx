@@ -200,8 +200,15 @@ const Schedule: React.FC = () => {
         wo.status !== 'Completed' && 
         wo.status !== 'Cancelled' && 
         !wo.scheduled_start_time &&
-        wo.clear_to_build !== false // Only schedule if clear to build
+        (wo.clear_to_build === undefined || wo.clear_to_build === true) // Only schedule if clear to build is true or undefined
       );
+
+      // Debug logging
+      console.log('Total work orders:', workOrders.length);
+      console.log('Available work orders:', availableWorkOrders.length);
+      console.log('Work order statuses:', [...new Set(workOrders.map(wo => wo.status))]);
+      console.log('Scheduled work orders:', workOrders.filter(wo => wo.scheduled_start_time).length);
+      console.log('Clear to build statuses:', [...new Set(workOrders.map(wo => wo.clear_to_build))]);
 
       // Get available production lines (exclude Hand Placement and disabled lines)
       const availableLines = productionLines.filter(line => 
@@ -211,13 +218,31 @@ const Schedule: React.FC = () => {
         line.auto_schedule_enabled !== false
       );
 
+      // Debug logging for production lines
+      console.log('Total production lines:', productionLines.length);
+      console.log('Available production lines:', availableLines.length);
+      console.log('Line statuses:', [...new Set(productionLines.map(line => line.status))]);
+      console.log('Line names:', productionLines.map(line => line.line_name));
+
       if (availableWorkOrders.length === 0) {
-        setError('No work orders available for scheduling');
+        const totalWorkOrders = workOrders.length;
+        const completedWorkOrders = workOrders.filter(wo => wo.status === 'Completed').length;
+        const cancelledWorkOrders = workOrders.filter(wo => wo.status === 'Cancelled').length;
+        const scheduledWorkOrders = workOrders.filter(wo => wo.scheduled_start_time).length;
+        const clearToBuildFalse = workOrders.filter(wo => wo.clear_to_build === false).length;
+        
+        setError(`No work orders available for scheduling. Total: ${totalWorkOrders}, Completed: ${completedWorkOrders}, Cancelled: ${cancelledWorkOrders}, Already Scheduled: ${scheduledWorkOrders}, Clear to Build False: ${clearToBuildFalse}`);
         return;
       }
 
       if (availableLines.length === 0) {
-        setError('No production lines available for scheduling');
+        const totalLines = productionLines.length;
+        const maintenanceLines = productionLines.filter(line => line.status === 'maintenance').length;
+        const downLines = productionLines.filter(line => line.status === 'down').length;
+        const handPlacementLines = productionLines.filter(line => line.line_name.toLowerCase().includes('hand')).length;
+        const disabledLines = productionLines.filter(line => line.auto_schedule_enabled === false).length;
+        
+        setError(`No production lines available for scheduling. Total: ${totalLines}, Maintenance: ${maintenanceLines}, Down: ${downLines}, Hand Placement: ${handPlacementLines}, Auto-schedule Disabled: ${disabledLines}`);
         return;
       }
 
