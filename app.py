@@ -2804,6 +2804,55 @@ def test_work_orders():
         app.logger.error(f"Error testing work_orders: {str(e)}")
         return jsonify({'error': f'Failed to test work_orders: {str(e)}'}), 500
 
+@app.route('/api/create-test-work-orders', methods=['POST'])
+@require_auth(['admin'])
+def create_test_work_orders():
+    """Create sample work orders for testing"""
+    try:
+        conn = get_database_connection()
+        cursor = conn.cursor()
+        
+        # Sample work orders data
+        test_work_orders = [
+            ('12345.1', 100, 'Ready', '2025-08-05', '2025-08-15', 2, 8, 1, 'ASSY-001', 'Rev A', 'Main control board', 'Acme Corp', 'ACME001', True),
+            ('12346.1', 50, 'Ready', '2025-08-03', '2025-08-12', 1.5, 6, 1, 'ASSY-002', 'Rev B', 'Power supply module', 'Tech Industries', 'TECH001', True),
+            ('12347.1', 200, 'Pending', '2025-08-10', '2025-08-25', 3, 12, 2, 'ASSY-003', 'Rev C', 'Display controller', 'Global Electronics', 'GLOB001', True),
+            ('12348.1', 75, 'Ready', '2025-08-02', '2025-08-10', 1, 4, 1, 'ASSY-004', 'Rev A', 'Sensor array', 'Precision Systems', 'PREC001', True),
+            ('12349.1', 150, 'Pending', '2025-08-08', '2025-08-20', 2.5, 10, 1, 'ASSY-005', 'Rev B', 'Communication module', 'Data Solutions', 'DATA001', True),
+            ('12350.1', 80, 'Ready', '2025-08-01', '2025-08-08', 1.5, 5, 1, 'ASSY-006', 'Rev A', 'Interface board', 'Smart Devices', 'SMART001', True),
+            ('12351.1', 120, 'Pending', '2025-08-12', '2025-08-30', 2, 8, 1, 'ASSY-007', 'Rev C', 'Memory controller', 'Advanced Tech', 'ADV001', True),
+            ('12352.1', 60, 'Ready', '2025-08-04', '2025-08-11', 1, 3, 1, 'ASSY-008', 'Rev A', 'Clock generator', 'Time Systems', 'TIME001', True)
+        ]
+        
+        created_count = 0
+        for wo_data in test_work_orders:
+            try:
+                cursor.execute("""
+                    INSERT INTO work_orders 
+                    (work_order_number, quantity, status, kit_date, ship_date, 
+                     setup_hours_estimated, production_time_hours_estimated, production_time_days_estimated,
+                     assembly_number, revision, description, customer_name, customer_id, clear_to_build)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, wo_data)
+                created_count += 1
+            except Exception as e:
+                app.logger.error(f"Error creating work order {wo_data[0]}: {str(e)}")
+                continue
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        return jsonify({
+            'message': f'Successfully created {created_count} test work orders',
+            'created_count': created_count,
+            'total_test_orders': len(test_work_orders)
+        }), 201
+        
+    except Exception as e:
+        app.logger.error(f"Error creating test work orders: {str(e)}")
+        return jsonify({'error': f'Failed to create test work orders: {str(e)}'}), 500
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
     debug = os.environ.get('DEBUG', 'false').lower() == 'true'
