@@ -2904,17 +2904,27 @@ def create_test_work_orders():
         created_count = 0
         for wo in test_work_orders:
             try:
+                # First, create or get the assembly
+                cursor.execute("""
+                    INSERT INTO assemblies (customer_id, assembly_number, revision, description)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (customer_id, assembly_number, revision) 
+                    DO UPDATE SET description = EXCLUDED.description
+                    RETURNING id
+                """, (wo['customer_id'], wo['assembly_number'], wo['revision'], wo['description']))
+                
+                assembly_id = cursor.fetchone()[0]
+                
+                # Then create the work order
                 cursor.execute("""
                     INSERT INTO work_orders (
-                        work_order_number, quantity, status, kit_date, ship_date,
-                        setup_hours_estimated, production_time_hours_estimated, production_time_days_estimated,
-                        assembly_number, revision, description, customer_id, created_at, updated_at
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                        work_order_number, assembly_id, quantity, status, kit_date, ship_date,
+                        setup_hours_estimated, production_time_hours_estimated, production_time_days_estimated
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """, (
-                    wo['work_order_number'], wo['quantity'], wo['status'],
+                    wo['work_order_number'], assembly_id, wo['quantity'], wo['status'],
                     wo['kit_date'], wo['ship_date'], wo['setup_hours_estimated'],
-                    wo['production_time_hours_estimated'], wo['production_time_days_estimated'],
-                    wo['assembly_number'], wo['revision'], wo['description'], wo['customer_id']
+                    wo['production_time_hours_estimated'], wo['production_time_days_estimated']
                 ))
                 created_count += 1
             except Exception as e:
