@@ -58,6 +58,9 @@ interface ProductionLine {
   lunch_break_duration: number;
   lunch_break_start: string;
   break_duration: number;
+  auto_schedule_enabled?: boolean;
+  maintenance_interval_days?: number;
+  efficiency_target?: number;
   next_available_slot?: string;
 }
 
@@ -183,7 +186,7 @@ const Schedule: React.FC = () => {
     }
   }, [baseUrl]);
 
-  // Auto-schedule algorithm
+  // Enhanced auto-schedule algorithm
   const runAutoSchedule = useCallback(async () => {
     if (!user || !['admin', 'scheduler'].includes(user.role)) {
       setError('Insufficient permissions for auto-scheduling');
@@ -192,74 +195,256 @@ const Schedule: React.FC = () => {
 
     setAutoScheduleRunning(true);
     try {
-      // Simple auto-scheduling algorithm
+      // Get available work orders (not completed, cancelled, or already scheduled)
       const availableWorkOrders = workOrders.filter(wo => 
-        wo.status !== 'Completed' && wo.status !== 'Cancelled' && !wo.scheduled_start_time
+        wo.status !== 'Completed' && 
+        wo.status !== 'Cancelled' && 
+        !wo.scheduled_start_time &&
+        wo.clear_to_build !== false // Only schedule if clear to build
       );
 
-      // Filter out Hand Placement lines from auto-scheduling
+      // Get available production lines (exclude Hand Placement and disabled lines)
       const availableLines = productionLines.filter(line => 
-        (line.status === 'idle' || line.status === 'running') &&
-        !line.line_name.toLowerCase().includes('hand') // Exclude Hand Placement
+        line.status !== 'maintenance' &&
+        line.status !== 'down' &&
+        !line.line_name.toLowerCase().includes('hand') &&
+        line.auto_schedule_enabled !== false
       );
 
-      // Sort work orders by ship date priority
+      if (availableWorkOrders.length === 0) {
+        setError('No work orders available for scheduling');
+        return;
+      }
+
+      if (availableLines.length === 0) {
+        setError('No production lines available for scheduling');
+        return;
+      }
+
+      // Enhanced priority scoring system
+      const calculateWorkOrderPriority = (wo: WorkOrder) => {
+        let priority = 0;
+        
+        // Ship date priority (earlier = higher priority)
+        if (wo.ship_date) {
+          const daysUntilShip = Math.ceil((new Date(wo.ship_date).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
+          priority += Math.max(0, 30 - daysUntilShip) * 10; // Higher priority for urgent shipments
+        }
+        
+        // Kit date priority
+        if (wo.kit_date) {
+          const daysUntilKit = Math.ceil((new Date(wo.kit_date).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
+          priority += Math.max(0, 7 - daysUntilKit) * 5; // Higher priority for urgent kits
+        }
+        
+        // Quantity priority (larger orders get higher priority)
+        priority += Math.min(wo.quantity / 100, 5); // Cap at 5 points
+        
+        // Status priority
+        const statusPriority = {
+          'Ready': 10,
+          'In Progress': 8,
+          'Pending': 5,
+          'On Hold': 2
+        };
+        priority += statusPriority[wo.status as keyof typeof statusPriority] || 0;
+        
+        return priority;
+      };
+
+      // Sort work orders by enhanced priority
       const prioritizedWorkOrders = [...availableWorkOrders].sort((a, b) => {
-        const dateA = a.ship_date ? new Date(a.ship_date) : new Date('9999-12-31');
-        const dateB = b.ship_date ? new Date(b.ship_date) : new Date('9999-12-31');
-        return dateA.getTime() - dateB.getTime();
+        const priorityA = calculateWorkOrderPriority(a);
+        const priorityB = calculateWorkOrderPriority(b);
+        return priorityB - priorityA; // Higher priority first
       });
 
-      // Simple assignment algorithm using line-specific configuration
-      let currentTime = new Date(selectedDate);
-      currentTime.setHours(8, 0, 0, 0); // Start at 8 AM
+      // Line scoring system
+      const calculateLineScore = (line: ProductionLine, workOrder: WorkOrder) => {
+        let score = 0;
+        
+        // Calculate work order duration
+        const setupHours = workOrder.setup_hours_estimated || 0;
+        const productionHours = workOrder.production_time_hours_estimated || 0;
+        const productionDays = workOrder.production_time_days_estimated || 0;
+        const totalDurationHours = setupHours + productionHours + (productionDays * 8);
+        
+        // Capacity utilization (prefer lines with more available capacity)
+        const utilizationRatio = line.available_capacity / (line.hours_per_shift * line.shifts_per_day * line.days_per_week);
+        score += (1 - utilizationRatio) * 20; // Higher score for less utilized lines
+        
+        // Efficiency score (prefer more efficient lines)
+        score += (line.efficiency_target || 85) / 10;
+        
+        // Time multiplier preference (prefer lines with lower multipliers for faster processing)
+        score += (1 / (line.time_multiplier || 1.0)) * 10;
+        
+        // Line type preference (prefer SMT over other types)
+        if (line.line_type === 'SMT') {
+          score += 15;
+        }
+        
+        // Current utilization (prefer less busy lines)
+        score += (1 - (line.current_utilization || 0) / 100) * 10;
+        
+        return score;
+      };
 
+      // Track scheduled work orders for conflict detection
+      const scheduledWorkOrders = workOrders.filter(wo => wo.scheduled_start_time);
+      
+      // Schedule work orders
       for (const workOrder of prioritizedWorkOrders) {
-        // Calculate total duration from available time fields
+        // Calculate work order duration
         const setupHours = workOrder.setup_hours_estimated || 0;
         const productionHours = workOrder.production_time_hours_estimated || 0;
         const productionDays = workOrder.production_time_days_estimated || 0;
         const totalDurationHours = setupHours + productionHours + (productionDays * 8);
 
-        // Find best available line based on capacity and efficiency
-        const bestLine = availableLines.find(line => 
-          line.available_capacity >= totalDurationHours &&
-          line.status !== 'maintenance' &&
-          line.status !== 'down'
-        );
+        // Find best line for this work order
+        let bestLine: ProductionLine | null = null;
+        let bestScore = -1;
+        let bestStartTime: Date | null = null;
 
-        if (bestLine) {
-          // Calculate schedule times using line-specific hours per shift
-          const startTime = new Date(currentTime);
-          const endTime = new Date(startTime);
+        for (const line of availableLines) {
+          // Check if line has enough capacity
+          if (line.available_capacity < totalDurationHours) continue;
+
+          // Calculate line score
+          const lineScore = calculateLineScore(line, workOrder);
           
-          // Apply line-specific time multiplier
+          // Find earliest available time slot on this line
+          const availableSlot = findEarliestAvailableSlot(line, workOrder, scheduledWorkOrders, selectedDate);
+          
+          if (availableSlot && lineScore > bestScore) {
+            bestLine = line;
+            bestScore = lineScore;
+            bestStartTime = availableSlot;
+          }
+        }
+
+        if (bestLine && bestStartTime) {
+          // Calculate end time with line-specific adjustments
           const adjustedDuration = totalDurationHours * (bestLine.time_multiplier || 1.0);
+          const endTime = new Date(bestStartTime);
           endTime.setHours(endTime.getHours() + adjustedDuration);
 
           // Update work order with schedule
           await updateWorkOrderSchedule(workOrder.id, {
             line_id: bestLine.id,
-            scheduled_start_time: startTime.toISOString(),
+            scheduled_start_time: bestStartTime.toISOString(),
             scheduled_end_time: endTime.toISOString(),
             line_position: 1
           });
 
-          // Move time forward
-          currentTime = new Date(endTime);
+          // Add to scheduled work orders for conflict detection
+          scheduledWorkOrders.push({
+            ...workOrder,
+            line_id: bestLine.id,
+            scheduled_start_time: bestStartTime.toISOString(),
+            scheduled_end_time: endTime.toISOString()
+          });
         }
       }
 
       // Refresh data
       await fetchWorkOrders();
+      setSuccessMessage('Auto-schedule completed successfully');
+      setTimeout(() => setSuccessMessage(null), 3000);
       setError(null);
     } catch (err) {
       console.error('Auto-schedule error:', err);
-      setError('Auto-scheduling failed');
+      setError('Auto-scheduling failed: ' + (err instanceof Error ? err.message : 'Unknown error'));
     } finally {
       setAutoScheduleRunning(false);
     }
   }, [workOrders, productionLines, selectedDate, user, updateWorkOrderSchedule, fetchWorkOrders]);
+
+  // Helper function to find earliest available time slot
+  const findEarliestAvailableSlot = (
+    line: ProductionLine, 
+    workOrder: WorkOrder, 
+    scheduledWorkOrders: WorkOrder[], 
+    targetDate: string
+  ): Date | null => {
+    // Parse line work hours
+    const startTimeStr = line.start_time || '08:00';
+    const endTimeStr = line.end_time || '17:00';
+    const [startHour, startMinute] = startTimeStr.split(':').map(Number);
+    const [endHour, endMinute] = endTimeStr.split(':').map(Number);
+
+    // Calculate work order duration
+    const setupHours = workOrder.setup_hours_estimated || 0;
+    const productionHours = workOrder.production_time_hours_estimated || 0;
+    const productionDays = workOrder.production_time_days_estimated || 0;
+    const totalDurationHours = setupHours + productionHours + (productionDays * 8);
+    const adjustedDuration = totalDurationHours * (line.time_multiplier || 1.0);
+
+    // Get existing schedules for this line on the target date
+    const lineSchedules = scheduledWorkOrders.filter(wo => 
+      wo.line_id === line.id && 
+      wo.scheduled_start_time &&
+      wo.scheduled_end_time &&
+      new Date(wo.scheduled_start_time).toDateString() === new Date(targetDate).toDateString()
+    ).sort((a, b) => 
+      new Date(a.scheduled_start_time!).getTime() - new Date(b.scheduled_start_time!).getTime()
+    );
+
+    // Start with line opening time
+    let currentTime = new Date(targetDate);
+    currentTime.setHours(startHour, startMinute, 0, 0);
+
+    // Check each potential time slot
+    while (currentTime.getHours() < endHour) {
+      const slotEndTime = new Date(currentTime);
+      slotEndTime.setHours(slotEndTime.getHours() + adjustedDuration);
+
+      // Check if slot extends beyond line closing time
+      if (slotEndTime.getHours() > endHour) {
+        // Move to next day
+        currentTime.setDate(currentTime.getDate() + 1);
+        currentTime.setHours(startHour, startMinute, 0, 0);
+        continue;
+      }
+
+      // Check for conflicts with existing schedules
+      const hasConflict = lineSchedules.some(schedule => {
+        const scheduleStart = new Date(schedule.scheduled_start_time!);
+        const scheduleEnd = new Date(schedule.scheduled_end_time!);
+        
+        return (
+          (currentTime >= scheduleStart && currentTime < scheduleEnd) ||
+          (slotEndTime > scheduleStart && slotEndTime <= scheduleEnd) ||
+          (currentTime <= scheduleStart && slotEndTime >= scheduleEnd)
+        );
+      });
+
+      if (!hasConflict) {
+        return currentTime;
+      }
+
+      // Move to next potential slot (after the conflicting schedule)
+      const nextConflict = lineSchedules.find(schedule => {
+        const scheduleStart = new Date(schedule.scheduled_start_time!);
+        return scheduleStart >= currentTime;
+      });
+
+      if (nextConflict) {
+        currentTime = new Date(nextConflict.scheduled_end_time!);
+      } else {
+        // No more conflicts, but check if we still have time today
+        if (currentTime.getHours() + adjustedDuration <= endHour) {
+          return currentTime;
+        } else {
+          // Move to next day
+          currentTime.setDate(currentTime.getDate() + 1);
+          currentTime.setHours(startHour, startMinute, 0, 0);
+        }
+      }
+    }
+
+    return null;
+  };
 
   // Line configuration functions
   const openLineConfig = (line: ProductionLine) => {
