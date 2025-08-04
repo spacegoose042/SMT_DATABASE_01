@@ -5,7 +5,8 @@ import {
   ArrowPathIcon,
   ExclamationTriangleIcon,
   CheckCircleIcon,
-  XCircleIcon
+  XCircleIcon,
+  PlusIcon
 } from '@heroicons/react/24/outline';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { useSocket } from '../contexts/SocketContext.tsx';
@@ -231,7 +232,11 @@ const Schedule: React.FC = () => {
         const scheduledWorkOrders = workOrders.filter(wo => wo.scheduled_start_time).length;
         const clearToBuildFalse = workOrders.filter(wo => wo.clear_to_build === false).length;
         
-        setError(`No work orders available for scheduling. Total: ${totalWorkOrders}, Completed: ${completedWorkOrders}, Cancelled: ${cancelledWorkOrders}, Already Scheduled: ${scheduledWorkOrders}, Clear to Build False: ${clearToBuildFalse}`);
+        if (totalWorkOrders === 0) {
+          setError('No work orders in the system. Please add some work orders first, or contact an administrator to create test data.');
+        } else {
+          setError(`No work orders available for scheduling. Total: ${totalWorkOrders}, Completed: ${completedWorkOrders}, Cancelled: ${cancelledWorkOrders}, Already Scheduled: ${scheduledWorkOrders}, Clear to Build False: ${clearToBuildFalse}`);
+        }
         return;
       }
 
@@ -384,6 +389,42 @@ const Schedule: React.FC = () => {
       setAutoScheduleRunning(false);
     }
   }, [workOrders, productionLines, selectedDate, user, updateWorkOrderSchedule, fetchWorkOrders]);
+
+  // Create test work orders function
+  const createTestWorkOrders = useCallback(async () => {
+    if (!user || !['admin', 'scheduler'].includes(user.role)) {
+      setError('Insufficient permissions to create test data');
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem('auth_token');
+      const response = await fetch(`${baseUrl}/api/create-test-work-orders`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        }
+      });
+
+      if (!response.ok) {
+        const errorData = await response.text();
+        throw new Error(`Failed to create test work orders: ${response.status} ${errorData}`);
+      }
+
+      const result = await response.json();
+      console.log('Test work orders created:', result);
+      
+      // Refresh work orders data
+      await fetchWorkOrders();
+      setError(null);
+      setSuccessMessage(`Successfully created ${result.created_count} test work orders`);
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err) {
+      console.error('Error creating test work orders:', err);
+      setError(err instanceof Error ? err.message : 'Failed to create test work orders');
+    }
+  }, [user, fetchWorkOrders]);
 
   // Helper function to find earliest available time slot
   const findEarliestAvailableSlot = (
@@ -665,6 +706,14 @@ const Schedule: React.FC = () => {
                   <CalendarIcon className="h-4 w-4 mr-2" />
                 )}
                 {autoScheduleRunning ? 'Scheduling...' : 'Auto Schedule'}
+              </button>
+              
+              <button
+                onClick={createTestWorkOrders}
+                className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md shadow-sm text-sy-black-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sy-green-500"
+              >
+                <PlusIcon className="h-4 w-4 mr-2" />
+                Create Test Data
               </button>
               <div className="text-xs text-sy-black-500">
                 <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800 mr-1">
