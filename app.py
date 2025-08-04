@@ -2906,12 +2906,12 @@ def create_test_work_orders():
             try:
                 cursor.execute("""
                     INSERT INTO work_orders (
-                        work_order_number, quantity, status, clear_to_build, kit_date, ship_date,
+                        work_order_number, quantity, status, kit_date, ship_date,
                         setup_hours_estimated, production_time_hours_estimated, production_time_days_estimated,
                         assembly_number, revision, description, customer_id, created_at, updated_at
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
                 """, (
-                    wo['work_order_number'], wo['quantity'], wo['status'], wo['clear_to_build'],
+                    wo['work_order_number'], wo['quantity'], wo['status'],
                     wo['kit_date'], wo['ship_date'], wo['setup_hours_estimated'],
                     wo['production_time_hours_estimated'], wo['production_time_days_estimated'],
                     wo['assembly_number'], wo['revision'], wo['description'], wo['customer_id']
