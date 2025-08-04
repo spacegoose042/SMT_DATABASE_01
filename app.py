@@ -2801,42 +2801,124 @@ def test_work_orders():
         })
         
     except Exception as e:
-        app.logger.error(f"Error testing work_orders: {str(e)}")
-        return jsonify({'error': f'Failed to test work_orders: {str(e)}'}), 500
+        return jsonify({
+            'error': str(e),
+            'error_type': type(e).__name__
+        }), 500
 
 @app.route('/api/create-test-work-orders', methods=['POST'])
 @require_auth(['admin'])
 def create_test_work_orders():
-    """Create sample work orders for testing"""
+    """Create test work orders for scheduling"""
     try:
         conn = get_database_connection()
         cursor = conn.cursor()
         
-        # Sample work orders data
+        # Check if we have customers
+        cursor.execute("SELECT id FROM customers LIMIT 1")
+        customer_result = cursor.fetchone()
+        if not customer_result:
+            return jsonify({'error': 'No customers found. Please create customers first.'}), 400
+        
+        customer_id = customer_result[0]
+        
+        # Create test work orders
         test_work_orders = [
-            ('12345.1', 100, 'Ready', '2025-08-05', '2025-08-15', 2, 8, 1, 'ASSY-001', 'Rev A', 'Main control board', 'Acme Corp', 'ACME001', True),
-            ('12346.1', 50, 'Ready', '2025-08-03', '2025-08-12', 1.5, 6, 1, 'ASSY-002', 'Rev B', 'Power supply module', 'Tech Industries', 'TECH001', True),
-            ('12347.1', 200, 'Pending', '2025-08-10', '2025-08-25', 3, 12, 2, 'ASSY-003', 'Rev C', 'Display controller', 'Global Electronics', 'GLOB001', True),
-            ('12348.1', 75, 'Ready', '2025-08-02', '2025-08-10', 1, 4, 1, 'ASSY-004', 'Rev A', 'Sensor array', 'Precision Systems', 'PREC001', True),
-            ('12349.1', 150, 'Pending', '2025-08-08', '2025-08-20', 2.5, 10, 1, 'ASSY-005', 'Rev B', 'Communication module', 'Data Solutions', 'DATA001', True),
-            ('12350.1', 80, 'Ready', '2025-08-01', '2025-08-08', 1.5, 5, 1, 'ASSY-006', 'Rev A', 'Interface board', 'Smart Devices', 'SMART001', True),
-            ('12351.1', 120, 'Pending', '2025-08-12', '2025-08-30', 2, 8, 1, 'ASSY-007', 'Rev C', 'Memory controller', 'Advanced Tech', 'ADV001', True),
-            ('12352.1', 60, 'Ready', '2025-08-04', '2025-08-11', 1, 3, 1, 'ASSY-008', 'Rev A', 'Clock generator', 'Time Systems', 'TIME001', True)
+            {
+                'work_order_number': 'WO-2024-001',
+                'quantity': 100,
+                'status': 'Ready',
+                'clear_to_build': True,
+                'kit_date': (datetime.now() + timedelta(days=2)).strftime('%Y-%m-%d'),
+                'ship_date': (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d'),
+                'setup_hours_estimated': 2,
+                'production_time_hours_estimated': 4,
+                'production_time_days_estimated': 0,
+                'assembly_number': 'ASSY-001',
+                'revision': 'A',
+                'description': 'Test Assembly 1',
+                'customer_id': customer_id
+            },
+            {
+                'work_order_number': 'WO-2024-002',
+                'quantity': 250,
+                'status': 'Pending',
+                'clear_to_build': True,
+                'kit_date': (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d'),
+                'ship_date': (datetime.now() + timedelta(days=5)).strftime('%Y-%m-%d'),
+                'setup_hours_estimated': 3,
+                'production_time_hours_estimated': 6,
+                'production_time_days_estimated': 0,
+                'assembly_number': 'ASSY-002',
+                'revision': 'B',
+                'description': 'Test Assembly 2',
+                'customer_id': customer_id
+            },
+            {
+                'work_order_number': 'WO-2024-003',
+                'quantity': 500,
+                'status': 'Ready',
+                'clear_to_build': True,
+                'kit_date': (datetime.now() + timedelta(days=3)).strftime('%Y-%m-%d'),
+                'ship_date': (datetime.now() + timedelta(days=10)).strftime('%Y-%m-%d'),
+                'setup_hours_estimated': 1,
+                'production_time_hours_estimated': 8,
+                'production_time_days_estimated': 1,
+                'assembly_number': 'ASSY-003',
+                'revision': 'C',
+                'description': 'Test Assembly 3',
+                'customer_id': customer_id
+            },
+            {
+                'work_order_number': 'WO-2024-004',
+                'quantity': 75,
+                'status': 'Ready',
+                'clear_to_build': True,
+                'kit_date': (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d'),
+                'ship_date': (datetime.now() + timedelta(days=3)).strftime('%Y-%m-%d'),
+                'setup_hours_estimated': 1,
+                'production_time_hours_estimated': 2,
+                'production_time_days_estimated': 0,
+                'assembly_number': 'ASSY-004',
+                'revision': 'A',
+                'description': 'Test Assembly 4',
+                'customer_id': customer_id
+            },
+            {
+                'work_order_number': 'WO-2024-005',
+                'quantity': 300,
+                'status': 'Pending',
+                'clear_to_build': True,
+                'kit_date': (datetime.now() + timedelta(days=4)).strftime('%Y-%m-%d'),
+                'ship_date': (datetime.now() + timedelta(days=12)).strftime('%Y-%m-%d'),
+                'setup_hours_estimated': 4,
+                'production_time_hours_estimated': 10,
+                'production_time_days_estimated': 1,
+                'assembly_number': 'ASSY-005',
+                'revision': 'D',
+                'description': 'Test Assembly 5',
+                'customer_id': customer_id
+            }
         ]
         
         created_count = 0
-        for wo_data in test_work_orders:
+        for wo in test_work_orders:
             try:
                 cursor.execute("""
-                    INSERT INTO work_orders 
-                    (work_order_number, quantity, status, kit_date, ship_date, 
-                     setup_hours_estimated, production_time_hours_estimated, production_time_days_estimated,
-                     assembly_number, revision, description, customer_name, customer_id, clear_to_build)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """, wo_data)
+                    INSERT INTO work_orders (
+                        work_order_number, quantity, status, clear_to_build, kit_date, ship_date,
+                        setup_hours_estimated, production_time_hours_estimated, production_time_days_estimated,
+                        assembly_number, revision, description, customer_id, created_at, updated_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                """, (
+                    wo['work_order_number'], wo['quantity'], wo['status'], wo['clear_to_build'],
+                    wo['kit_date'], wo['ship_date'], wo['setup_hours_estimated'],
+                    wo['production_time_hours_estimated'], wo['production_time_days_estimated'],
+                    wo['assembly_number'], wo['revision'], wo['description'], wo['customer_id']
+                ))
                 created_count += 1
             except Exception as e:
-                app.logger.error(f"Error creating work order {wo_data[0]}: {str(e)}")
+                app.logger.error(f"Error creating work order {wo['work_order_number']}: {e}")
                 continue
         
         conn.commit()
@@ -2845,13 +2927,48 @@ def create_test_work_orders():
         
         return jsonify({
             'message': f'Successfully created {created_count} test work orders',
-            'created_count': created_count,
-            'total_test_orders': len(test_work_orders)
+            'created_count': created_count
         }), 201
         
     except Exception as e:
         app.logger.error(f"Error creating test work orders: {str(e)}")
         return jsonify({'error': f'Failed to create test work orders: {str(e)}'}), 500
+
+@app.route('/api/migrate/add-clear-to-build-column', methods=['POST'])
+@require_auth(['admin'])
+def migrate_add_clear_to_build_column():
+    """Add clear_to_build column to work_orders table"""
+    try:
+        conn = get_database_connection()
+        cursor = conn.cursor()
+        
+        # Add clear_to_build column
+        cursor.execute("ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS clear_to_build BOOLEAN DEFAULT true")
+        
+        # Update existing records to have clear_to_build = true
+        cursor.execute("UPDATE work_orders SET clear_to_build = true WHERE clear_to_build IS NULL")
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        return jsonify({
+            'message': 'Successfully added clear_to_build column to work_orders table'
+        }), 200
+        
+    except Exception as e:
+        app.logger.error(f"Error adding clear_to_build column: {str(e)}")
+        return jsonify({'error': f'Failed to add clear_to_build column: {str(e)}'}), 500
+
+        return jsonify({
+            'sample_row': list(sample_row) if sample_row else None,
+            'table_structure': columns,
+            'total_rows': total_rows
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error testing work_orders: {str(e)}")
+        return jsonify({'error': f'Failed to test work_orders: {str(e)}'}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
