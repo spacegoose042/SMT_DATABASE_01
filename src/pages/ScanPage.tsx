@@ -47,7 +47,7 @@ const ScanPage: React.FC = () => {
       try {
         const baseUrl = process.env.NODE_ENV === 'production'
           ? window.location.origin
-          : 'http://localhost:5000';
+          : 'http://localhost:8080';
         const response = await fetch(`${baseUrl}/api/mobile/statuses`, {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
@@ -107,7 +107,7 @@ const ScanPage: React.FC = () => {
     try {
       const baseUrl = process.env.NODE_ENV === 'production'
         ? window.location.origin
-        : 'http://localhost:5000';
+        : 'http://localhost:8080';
       const response = await fetch(`${baseUrl}/api/mobile/qr/${encodeURIComponent(data)}`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
@@ -156,7 +156,7 @@ const ScanPage: React.FC = () => {
     try {
       const baseUrl = process.env.NODE_ENV === 'production'
         ? window.location.origin
-        : 'http://localhost:5000';
+        : 'http://localhost:8080';
       const response = await fetch(`${baseUrl}/api/timeline/work-orders/${workOrder.id}/status`, {
         method: 'PUT',
         headers: {

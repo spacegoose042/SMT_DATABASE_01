@@ -39,7 +39,6 @@ CREATE TABLE production_lines (
     line_name VARCHAR(255) NOT NULL UNIQUE,
     line_type VARCHAR(100),
     location_area VARCHAR(100),
-    max_capacity INTEGER NOT NULL,
     time_multiplier DECIMAL(3,2) DEFAULT 1.0, -- Line 1 has 2.0, others 1.0
     current_utilization DECIMAL(5,2) DEFAULT 0.0, -- percentage
     active BOOLEAN DEFAULT true,
@@ -47,14 +46,20 @@ CREATE TABLE production_lines (
     status_reason line_status_reason,
     status_start_time TIMESTAMP WITH TIME ZONE,
     expected_return_time TIMESTAMP WITH TIME ZONE,
+    
+    -- Work Hours Configuration (per line)
     shifts_per_day INTEGER DEFAULT 1,
     hours_per_shift INTEGER DEFAULT 8,
     days_per_week INTEGER DEFAULT 5,
+    start_time TIME DEFAULT '08:00:00', -- Shift start time
+    end_time TIME DEFAULT '17:00:00',   -- Shift end time
     lunch_break_duration INTEGER DEFAULT 60, -- minutes
     lunch_break_start TIME DEFAULT '12:00:00',
+    break_duration INTEGER DEFAULT 15, -- minutes for other breaks
+    
     skill_level_required VARCHAR(50),
     current_queue_length INTEGER DEFAULT 0,
-    available_capacity INTEGER,
+    available_capacity INTEGER, -- Calculated field: total available hours
     next_available_slot TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
@@ -79,6 +84,7 @@ CREATE TABLE work_orders (
     assembly_id UUID NOT NULL REFERENCES assemblies(id),
     quantity INTEGER NOT NULL,
     status work_order_status NOT NULL DEFAULT 'Ready',
+    clear_to_build BOOLEAN DEFAULT true, -- New field: prevents scheduling if false
     kit_date DATE,
     ship_date DATE,
     setup_hours_estimated DECIMAL(8,2),
@@ -93,6 +99,8 @@ CREATE TABLE work_orders (
     trolley_number INTEGER,
     line_id UUID REFERENCES production_lines(id),
     line_position INTEGER,
+    scheduled_start_time TIMESTAMP WITH TIME ZONE,
+    scheduled_end_time TIMESTAMP WITH TIME ZONE,
     is_hand_placed BOOLEAN DEFAULT false,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -169,6 +177,8 @@ CREATE INDEX idx_trolley_management_status ON trolley_management(current_status)
 -- Composite indexes for common queries
 CREATE INDEX idx_work_orders_line_date ON work_orders(line_id, ship_date);
 CREATE INDEX idx_work_orders_status_date ON work_orders(status, ship_date);
+CREATE INDEX idx_work_orders_scheduled_time ON work_orders(scheduled_start_time, scheduled_end_time);
+CREATE INDEX idx_work_orders_line_scheduled ON work_orders(line_id, scheduled_start_time);
 CREATE INDEX idx_assemblies_customer_number ON assemblies(customer_id, assembly_number);
 CREATE INDEX idx_work_orders_trolley_status ON work_orders(trolley_number, status);
 
