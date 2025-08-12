@@ -335,16 +335,26 @@ const Schedule: React.FC = () => {
         let bestStartTime: Date | null = null;
 
         for (const line of availableLines) {
+          console.log(`🔍 Checking line ${line.line_name}:`);
+          console.log(`  Available capacity: ${line.available_capacity} hours`);
+          console.log(`  Required duration: ${totalDurationHours} hours`);
+          
           // Check if line has enough capacity
-          if (line.available_capacity < totalDurationHours) continue;
+          if (line.available_capacity < totalDurationHours) {
+            console.log(`  ❌ Insufficient capacity`);
+            continue;
+          }
 
           // Calculate line score
           const lineScore = calculateLineScore(line, workOrder);
+          console.log(`  📊 Line score: ${lineScore}`);
           
           // Find earliest available time slot on this line
           const availableSlot = findEarliestAvailableSlot(line, workOrder, scheduledWorkOrders, selectedDate);
+          console.log(`  ⏰ Available slot: ${availableSlot ? availableSlot.toISOString() : 'None'}`);
           
           if (availableSlot && lineScore > bestScore) {
+            console.log(`  ✅ New best line!`);
             bestLine = line;
             bestScore = lineScore;
             bestStartTime = availableSlot;
