@@ -193,6 +193,11 @@ const Schedule: React.FC = () => {
       return;
     }
 
+    console.log('🚀 Starting auto-schedule...');
+    console.log('👤 User role:', user.role);
+    console.log('🌐 Base URL:', baseUrl);
+    console.log('🔑 Auth token exists:', !!localStorage.getItem('auth_token'));
+
     setAutoScheduleRunning(true);
     try {
       // Get available work orders (not completed, cancelled, or already scheduled)
@@ -352,13 +357,22 @@ const Schedule: React.FC = () => {
           const endTime = new Date(bestStartTime);
           endTime.setHours(endTime.getHours() + adjustedDuration);
 
+          console.log(`📅 Scheduling work order ${workOrder.work_order_number} on ${bestLine.line_name}`);
+          console.log(`⏰ Start: ${bestStartTime.toISOString()}, End: ${endTime.toISOString()}`);
+
           // Update work order with schedule
-          await updateWorkOrderSchedule(workOrder.id, {
-            line_id: bestLine.id,
-            scheduled_start_time: bestStartTime.toISOString(),
-            scheduled_end_time: endTime.toISOString(),
-            line_position: 1
-          });
+          try {
+            await updateWorkOrderSchedule(workOrder.id, {
+              line_id: bestLine.id,
+              scheduled_start_time: bestStartTime.toISOString(),
+              scheduled_end_time: endTime.toISOString(),
+              line_position: 1
+            });
+            console.log(`✅ Successfully scheduled work order ${workOrder.work_order_number}`);
+          } catch (scheduleError) {
+            console.error(`❌ Failed to schedule work order ${workOrder.work_order_number}:`, scheduleError);
+            throw new Error(`Failed to schedule work order ${workOrder.work_order_number}: ${scheduleError.message}`);
+          }
 
           // Add to scheduled work orders for conflict detection
           scheduledWorkOrders.push({
