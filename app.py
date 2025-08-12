@@ -1758,16 +1758,11 @@ def timeline_update_work_order_status(work_order_id):
 def update_work_order_schedule(work_order_id):
     """Update work order scheduling information"""
     
-    # Handle CORS preflight request
+    # Skip authentication for OPTIONS requests - let Flask-CORS handle it
     if request.method == 'OPTIONS':
-        response = jsonify({'message': 'CORS preflight'})
-        response.headers.add('Access-Control-Allow-Origin', '*')
-        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With')
-        response.headers.add('Access-Control-Allow-Methods', 'PUT,OPTIONS')
-        response.headers.add('Access-Control-Max-Age', '86400')
-        return response
+        return '', 200
     
-    # Check authentication for PUT requests
+    # Only check authentication for non-OPTIONS requests
     token = None
     if 'Authorization' in request.headers:
         auth_header = request.headers['Authorization']
