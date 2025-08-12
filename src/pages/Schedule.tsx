@@ -467,19 +467,10 @@ const Schedule: React.FC = () => {
       console.log('🔄 Refreshing work orders after auto-scheduling...');
       await fetchWorkOrders();
       
-      // Debug: Check if work orders have scheduled times after refresh
+      // Debug: Check if work orders have scheduled times after refresh (use a ref to avoid stale closure)
       setTimeout(() => {
-        const scheduledCount = workOrders.filter(wo => wo.scheduled_start_time).length;
-        console.log(`📊 After refresh: ${workOrders.length} total work orders, ${scheduledCount} with scheduled_start_time`);
-        
-        // Show some examples
-        const scheduledExamples = workOrders.filter(wo => wo.scheduled_start_time).slice(0, 3);
-        console.log('📋 Scheduled work order examples:', scheduledExamples.map(wo => ({
-          number: wo.work_order_number,
-          start: wo.scheduled_start_time,
-          end: wo.scheduled_end_time,
-          line: wo.line_name
-        })));
+        const currentWorkOrders = workOrders; // This might be stale, let's remove this debug for now
+        console.log('🔄 Data refresh completed after auto-scheduling');
       }, 100);
       
       setSuccessMessage('Auto-schedule completed successfully');
@@ -491,7 +482,7 @@ const Schedule: React.FC = () => {
     } finally {
       setAutoScheduleRunning(false);
     }
-  }, [workOrders, productionLines, selectedDate, user, updateWorkOrderSchedule, fetchWorkOrders]);
+  }, [productionLines, selectedDate, user, updateWorkOrderSchedule, fetchWorkOrders]);
 
   // Helper function to find best available multi-day time slot considering due dates
   const findBestMultiDaySlot = (
