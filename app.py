@@ -2521,6 +2521,53 @@ def fix_scheduling_columns():
             'timestamp': datetime.now().isoformat()
         }), 500
 
+@app.route('/api/debug/production-lines-check', methods=['GET'])
+@require_auth(['admin'])
+def debug_production_lines_check():
+    """Debug endpoint to check what production lines the API actually sees"""
+    try:
+        conn = get_database_connection()
+        cursor = conn.cursor()
+        
+        # Get all production lines as the API sees them
+        cursor.execute("""
+            SELECT line_name, available_capacity, shifts_per_day, hours_per_shift, days_per_week
+            FROM production_lines 
+            ORDER BY line_name
+        """)
+        
+        lines = []
+        for row in cursor.fetchall():
+            lines.append({
+                'line_name': row[0],
+                'available_capacity': row[1],
+                'shifts_per_day': row[2],
+                'hours_per_shift': row[3],
+                'days_per_week': row[4]
+            })
+        
+        # Get total count
+        cursor.execute("SELECT COUNT(*) FROM production_lines")
+        total_count = cursor.fetchone()[0]
+        
+        cursor.close()
+        conn.close()
+        
+        return jsonify({
+            'message': 'Production lines from API database',
+            'total_lines': total_count,
+            'lines': lines,
+            'timestamp': datetime.now().isoformat()
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Debug production lines error: {e}")
+        return jsonify({
+            'error': 'Debug failed',
+            'details': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
 @app.route('/api/work-orders/<work_order_id>/clear-to-build', methods=['PUT', 'OPTIONS'])
 @require_auth(['admin', 'scheduler', 'supervisor'])
 def update_clear_to_build(work_order_id):
