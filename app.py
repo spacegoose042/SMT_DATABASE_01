@@ -1755,7 +1755,6 @@ def timeline_update_work_order_status(work_order_id):
         return add_cors_headers(response), 500
 
 @app.route('/api/schedule/work-orders/<work_order_id>', methods=['PUT', 'OPTIONS'])
-@require_auth(['admin', 'scheduler', 'supervisor'])
 def update_work_order_schedule(work_order_id):
     """Update work order scheduling information"""
     
@@ -1767,6 +1766,37 @@ def update_work_order_schedule(work_order_id):
         response.headers.add('Access-Control-Allow-Methods', 'PUT,OPTIONS')
         response.headers.add('Access-Control-Max-Age', '86400')
         return response
+    
+    # Check authentication for PUT requests
+    token = None
+    if 'Authorization' in request.headers:
+        auth_header = request.headers['Authorization']
+        try:
+            token = auth_header.split(' ')[1]  # Bearer <token>
+        except IndexError:
+            pass
+    
+    if not token:
+        response = jsonify({'error': 'Authentication token required'})
+        return add_cors_headers(response), 401
+    
+    payload = decode_jwt_token(token)
+    if not payload:
+        response = jsonify({'error': 'Invalid or expired token'})
+        return add_cors_headers(response), 401
+    
+    # Check role permissions
+    required_roles = ['admin', 'scheduler', 'supervisor']
+    if payload.get('role') not in required_roles:
+        response = jsonify({'error': 'Insufficient permissions'})
+        return add_cors_headers(response), 403
+    
+    # Add user info to request context
+    request.current_user = {
+        'user_id': payload['user_id'],
+        'username': payload['username'],
+        'role': payload['role']
+    }
     
     try:
         data = request.get_json()
