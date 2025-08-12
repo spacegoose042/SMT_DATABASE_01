@@ -138,7 +138,7 @@ const Schedule: React.FC = () => {
       if (!response.ok) throw new Error('Failed to fetch work orders');
       
       const data = await response.json();
-      setWorkOrders(data.timeline || []);
+      setWorkOrders(data.work_orders || []);
     } catch (err) {
       console.error('Error fetching work orders:', err);
       setError('Failed to load work orders');
