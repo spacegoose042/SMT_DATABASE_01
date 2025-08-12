@@ -2478,6 +2478,49 @@ def add_line_numbers():
             'timestamp': datetime.now().isoformat()
         }), 500
 
+@app.route('/api/debug/fix-scheduling-columns', methods=['POST'])
+@require_auth(['admin'])
+def fix_scheduling_columns():
+    """Debug endpoint to add missing scheduling columns"""
+    try:
+        conn = get_database_connection()
+        cursor = conn.cursor()
+        
+        # Add missing columns if they don't exist
+        cursor.execute("""
+            ALTER TABLE work_orders 
+            ADD COLUMN IF NOT EXISTS scheduled_start_time TIMESTAMP WITH TIME ZONE,
+            ADD COLUMN IF NOT EXISTS scheduled_end_time TIMESTAMP WITH TIME ZONE
+        """)
+        
+        # Check current work order count
+        cursor.execute("SELECT COUNT(*) FROM work_orders")
+        count = cursor.fetchone()[0]
+        
+        # Check if specific work order exists
+        cursor.execute("SELECT COUNT(*) FROM work_orders WHERE id = %s", 
+                      ('4e738811-a985-4966-b5a3-54edc5b27aca',))
+        specific_exists = cursor.fetchone()[0]
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        return jsonify({
+            'message': 'Scheduling columns fixed',
+            'total_work_orders': count,
+            'target_work_order_exists': specific_exists > 0,
+            'timestamp': datetime.now().isoformat()
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Debug fix error: {e}")
+        return jsonify({
+            'error': 'Fix failed',
+            'details': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
 @app.route('/api/work-orders/<work_order_id>/clear-to-build', methods=['PUT', 'OPTIONS'])
 @require_auth(['admin', 'scheduler', 'supervisor'])
 def update_clear_to_build(work_order_id):
