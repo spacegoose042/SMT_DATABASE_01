@@ -249,31 +249,45 @@ const Schedule: React.FC = () => {
         return;
       }
 
-      // Enhanced priority scoring system
+      // Enhanced priority scoring system focused on due date adherence
       const calculateWorkOrderPriority = (wo: WorkOrder) => {
         let priority = 0;
         
-        // Ship date priority (earlier = higher priority)
+        // Ship date priority - primary factor (finish as close to due date as possible)
         if (wo.ship_date) {
           const daysUntilShip = Math.ceil((new Date(wo.ship_date).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
-          priority += Math.max(0, 30 - daysUntilShip) * 10; // Higher priority for urgent shipments
+          
+          if (daysUntilShip <= 0) {
+            // Past due - HIGHEST priority
+            priority += 1000 + Math.abs(daysUntilShip);
+          } else if (daysUntilShip <= 21) {
+            // Due within 3 weeks - high priority, closer to due date = higher priority
+            priority += 500 + (21 - daysUntilShip) * 20;
+          } else {
+            // Due further out - lower priority
+            priority += Math.max(0, 100 - daysUntilShip);
+          }
+        } else {
+          // No ship date - medium priority
+          priority += 200;
         }
         
-        // Kit date priority
+        // Kit date priority (secondary factor)
         if (wo.kit_date) {
           const daysUntilKit = Math.ceil((new Date(wo.kit_date).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
-          priority += Math.max(0, 7 - daysUntilKit) * 5; // Higher priority for urgent kits
+          if (daysUntilKit <= 7) {
+            priority += Math.max(0, 7 - daysUntilKit) * 5;
+          }
         }
         
-        // Quantity priority (larger orders get higher priority)
-        priority += Math.min(wo.quantity / 100, 5); // Cap at 5 points
-        
-        // Status priority
+        // Status priority (ready work orders should be scheduled)
         const statusPriority = {
-          'Ready': 10,
-          'In Progress': 8,
-          'Pending': 5,
-          'On Hold': 2
+          'Ready': 50,
+          'Ready*': 50,
+          '1st Side Ready': 45,
+          'In Progress': 40,
+          'Pending': 20,
+          'On Hold': 5
         };
         priority += statusPriority[wo.status as keyof typeof statusPriority] || 0;
         
@@ -356,8 +370,8 @@ const Schedule: React.FC = () => {
           const lineScore = calculateLineScore(line, workOrder);
           console.log(`  📊 Line score: ${lineScore}`);
           
-          // Find earliest available multi-day slot on this line
-          const availableSlot = findEarliestMultiDaySlot(line, workOrder, scheduledWorkOrders, selectedDate, daysRequired);
+          // Find best available multi-day slot on this line (considering due dates)
+          const availableSlot = findBestMultiDaySlot(line, workOrder, scheduledWorkOrders, selectedDate, daysRequired);
           console.log(`  ⏰ Available slot: ${availableSlot ? availableSlot.toISOString() : 'None'}`);
           
           if (availableSlot && lineScore > bestScore) {
@@ -447,6 +461,61 @@ const Schedule: React.FC = () => {
     }
   }, [workOrders, productionLines, selectedDate, user, updateWorkOrderSchedule, fetchWorkOrders]);
 
+  // Helper function to find best available multi-day time slot considering due dates
+  const findBestMultiDaySlot = (
+    line: ProductionLine, 
+    workOrder: WorkOrder, 
+    scheduledWorkOrders: WorkOrder[], 
+    targetDate: string,
+    daysRequired: number
+  ): Date | null => {
+    const earliestSlot = findEarliestMultiDaySlot(line, workOrder, scheduledWorkOrders, targetDate, daysRequired);
+    if (!earliestSlot || !workOrder.ship_date) {
+      return earliestSlot;
+    }
+
+    // Calculate work order duration for end date calculation
+    const setupHours = workOrder.setup_hours_estimated || 0;
+    const productionHours = workOrder.production_time_hours_estimated || 0;
+    const productionDays = workOrder.production_time_days_estimated || 0;
+    const totalDurationHours = setupHours + productionHours + (productionDays * 8);
+    const adjustedDuration = totalDurationHours * (line.time_multiplier || 1.0);
+    const dailyCapacity = (line.shifts_per_day || 1) * (line.hours_per_shift || 8);
+    
+    const shipDate = new Date(workOrder.ship_date);
+    const earliestDaysFromStart = Math.ceil(adjustedDuration / dailyCapacity);
+    
+    // Calculate earliest finish date
+    const earliestEndDate = new Date(earliestSlot);
+    let remainingDays = earliestDaysFromStart;
+    while (remainingDays > 0) {
+      earliestEndDate.setDate(earliestEndDate.getDate() + 1);
+      // Skip weekends if line doesn't work weekends
+      const dayOfWeek = earliestEndDate.getDay();
+      if ((line.days_per_week || 5) === 5 && (dayOfWeek === 0 || dayOfWeek === 6)) {
+        continue;
+      }
+      remainingDays--;
+    }
+
+    // If earliest finish is more than 3 weeks before due date, try to find a later slot
+    const threeWeeksBeforeDue = new Date(shipDate);
+    threeWeeksBeforeDue.setDate(threeWeeksBeforeDue.getDate() - 21);
+    
+    if (earliestEndDate < threeWeeksBeforeDue) {
+      // Try to find a slot that finishes closer to the due date
+      const targetStartDate = new Date(threeWeeksBeforeDue);
+      targetStartDate.setDate(targetStartDate.getDate() - earliestDaysFromStart);
+      
+      const laterSlot = findEarliestMultiDaySlot(line, workOrder, scheduledWorkOrders, targetStartDate.toISOString().split('T')[0], daysRequired);
+      if (laterSlot) {
+        return laterSlot;
+      }
+    }
+
+    return earliestSlot;
+  };
+
   // Helper function to find earliest available multi-day time slot
   const findEarliestMultiDaySlot = (
     line: ProductionLine, 
@@ -470,7 +539,7 @@ const Schedule: React.FC = () => {
 
     // Start checking from the target date
     let checkDate = new Date(targetDate);
-    const maxLookAhead = 30; // Don't look more than 30 days ahead
+    const maxLookAhead = 45; // Don't look more than 45 days ahead
     
     for (let dayOffset = 0; dayOffset < maxLookAhead; dayOffset++) {
       const currentCheckDate = new Date(checkDate);
@@ -1197,6 +1266,155 @@ const Schedule: React.FC = () => {
                 <button
                   onClick={() => {
                     setShowLineConfigModal(false);
+                    setSelectedLineForConfig(null);
+                    setEditingLineConfig(null);
+                  }}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-sy-black-700 mb-2">
+                    Hours per Shift
+                  </label>
+                  <input
+                    type="number"
+                    value={editingLineConfig.hours_per_shift}
+                    onChange={(e) => setEditingLineConfig(prev => ({ ...prev!, hours_per_shift: parseInt(e.target.value) }))}
+                    className="block w-full border-gray-300 rounded-md shadow-sm focus:ring-sy-green-500 focus:border-sy-green-500 sm:text-sm"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-sy-black-700 mb-2">
+                    Shifts per Day
+                  </label>
+                  <input
+                    type="number"
+                    value={editingLineConfig.shifts_per_day}
+                    onChange={(e) => setEditingLineConfig(prev => ({ ...prev!, shifts_per_day: parseInt(e.target.value) }))}
+                    className="block w-full border-gray-300 rounded-md shadow-sm focus:ring-sy-green-500 focus:border-sy-green-500 sm:text-sm"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-sy-black-700 mb-2">
+                    Days per Week
+                  </label>
+                  <input
+                    type="number"
+                    value={editingLineConfig.days_per_week}
+                    onChange={(e) => setEditingLineConfig(prev => ({ ...prev!, days_per_week: parseInt(e.target.value) }))}
+                    className="block w-full border-gray-300 rounded-md shadow-sm focus:ring-sy-green-500 focus:border-sy-green-500 sm:text-sm"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-sy-black-700 mb-2">
+                    Time Multiplier
+                  </label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={editingLineConfig.time_multiplier}
+                    onChange={(e) => setEditingLineConfig(prev => ({ ...prev!, time_multiplier: parseFloat(e.target.value) }))}
+                    className="block w-full border-gray-300 rounded-md shadow-sm focus:ring-sy-green-500 focus:border-sy-green-500 sm:text-sm"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-sy-black-700 mb-2">
+                    Start Time
+                  </label>
+                  <input
+                    type="time"
+                    value={editingLineConfig.start_time}
+                    onChange={(e) => setEditingLineConfig(prev => ({ ...prev!, start_time: e.target.value }))}
+                    className="block w-full border-gray-300 rounded-md shadow-sm focus:ring-sy-green-500 focus:border-sy-green-500 sm:text-sm"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-sy-black-700 mb-2">
+                    End Time
+                  </label>
+                  <input
+                    type="time"
+                    value={editingLineConfig.end_time}
+                    onChange={(e) => setEditingLineConfig(prev => ({ ...prev!, end_time: e.target.value }))}
+                    className="block w-full border-gray-300 rounded-md shadow-sm focus:ring-sy-green-500 focus:border-sy-green-500 sm:text-sm"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-sy-black-700 mb-2">
+                    Lunch Break Duration (minutes)
+                  </label>
+                  <input
+                    type="number"
+                    value={editingLineConfig.lunch_break_duration}
+                    onChange={(e) => setEditingLineConfig(prev => ({ ...prev!, lunch_break_duration: parseInt(e.target.value) }))}
+                    className="block w-full border-gray-300 rounded-md shadow-sm focus:ring-sy-green-500 focus:border-sy-green-500 sm:text-sm"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-sy-black-700 mb-2">
+                    Lunch Break Start Time
+                  </label>
+                  <input
+                    type="time"
+                    value={editingLineConfig.lunch_break_start}
+                    onChange={(e) => setEditingLineConfig(prev => ({ ...prev!, lunch_break_start: e.target.value }))}
+                    className="block w-full border-gray-300 rounded-md shadow-sm focus:ring-sy-green-500 focus:border-sy-green-500 sm:text-sm"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-sy-black-700 mb-2">
+                    Break Duration (minutes)
+                  </label>
+                  <input
+                    type="number"
+                    value={editingLineConfig.break_duration}
+                    onChange={(e) => setEditingLineConfig(prev => ({ ...prev!, break_duration: parseInt(e.target.value) }))}
+                    className="block w-full border-gray-300 rounded-md shadow-sm focus:ring-sy-green-500 focus:border-sy-green-500 sm:text-sm"
+                  />
+                </div>
+              </div>
+              
+              <div className="flex justify-end space-x-3 mt-6">
+                <button
+                  onClick={() => {
+                    setShowLineConfigModal(false);
+                    setSelectedLineForConfig(null);
+                    setEditingLineConfig(null);
+                  }}
+                  className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-sy-black-700 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => updateLineConfig(selectedLineForConfig.id, editingLineConfig)}
+                  className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-sy-green-600 hover:bg-sy-green-700"
+                >
+                  Save Configuration
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default Schedule; 
                     setSelectedLineForConfig(null);
                     setEditingLineConfig(null);
                   }}
