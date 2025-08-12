@@ -138,6 +138,21 @@ const Schedule: React.FC = () => {
       if (!response.ok) throw new Error('Failed to fetch work orders');
       
       const data = await response.json();
+      console.log('📥 API Response - Total work orders:', data.work_orders?.length || 0);
+      
+      // Debug: Check scheduled work orders in API response
+      const scheduledInResponse = (data.work_orders || []).filter((wo: WorkOrder) => wo.scheduled_start_time);
+      console.log('📅 Work orders with scheduled_start_time in API response:', scheduledInResponse.length);
+      
+      if (scheduledInResponse.length > 0) {
+        console.log('📋 First few scheduled work orders from API:', scheduledInResponse.slice(0, 3).map((wo: WorkOrder) => ({
+          number: wo.work_order_number,
+          start: wo.scheduled_start_time,
+          end: wo.scheduled_end_time,
+          line: wo.line_name
+        })));
+      }
+      
       setWorkOrders(data.work_orders || []);
     } catch (err) {
       console.error('Error fetching work orders:', err);
@@ -449,7 +464,24 @@ const Schedule: React.FC = () => {
       }
 
       // Refresh data
+      console.log('🔄 Refreshing work orders after auto-scheduling...');
       await fetchWorkOrders();
+      
+      // Debug: Check if work orders have scheduled times after refresh
+      setTimeout(() => {
+        const scheduledCount = workOrders.filter(wo => wo.scheduled_start_time).length;
+        console.log(`📊 After refresh: ${workOrders.length} total work orders, ${scheduledCount} with scheduled_start_time`);
+        
+        // Show some examples
+        const scheduledExamples = workOrders.filter(wo => wo.scheduled_start_time).slice(0, 3);
+        console.log('📋 Scheduled work order examples:', scheduledExamples.map(wo => ({
+          number: wo.work_order_number,
+          start: wo.scheduled_start_time,
+          end: wo.scheduled_end_time,
+          line: wo.line_name
+        })));
+      }, 100);
+      
       setSuccessMessage('Auto-schedule completed successfully');
       setTimeout(() => setSuccessMessage(null), 3000);
       setError(null);
