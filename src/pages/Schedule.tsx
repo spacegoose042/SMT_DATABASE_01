@@ -336,12 +336,19 @@ const Schedule: React.FC = () => {
 
         for (const line of availableLines) {
           console.log(`🔍 Checking line ${line.line_name}:`);
-          console.log(`  Available capacity: ${line.available_capacity} hours`);
-          console.log(`  Required duration: ${totalDurationHours} hours`);
           
-          // Check if line has enough capacity
-          if (line.available_capacity < totalDurationHours) {
-            console.log(`  ❌ Insufficient capacity`);
+          // Calculate daily capacity for this line
+          const dailyCapacity = (line.shifts_per_day || 1) * (line.hours_per_shift || 8);
+          console.log(`  Daily capacity: ${dailyCapacity} hours/day`);
+          console.log(`  Required duration: ${totalDurationHours} hours total`);
+          
+          // Calculate how many days this work order will need
+          const daysRequired = Math.ceil(totalDurationHours / dailyCapacity);
+          console.log(`  Days required: ${daysRequired} days`);
+          
+          // Check if work order can fit within daily capacity (even if it spans multiple days)
+          if (dailyCapacity === 0) {
+            console.log(`  ❌ No daily capacity configured`);
             continue;
           }
 
@@ -349,8 +356,8 @@ const Schedule: React.FC = () => {
           const lineScore = calculateLineScore(line, workOrder);
           console.log(`  📊 Line score: ${lineScore}`);
           
-          // Find earliest available time slot on this line
-          const availableSlot = findEarliestAvailableSlot(line, workOrder, scheduledWorkOrders, selectedDate);
+          // Find earliest available multi-day slot on this line
+          const availableSlot = findEarliestMultiDaySlot(line, workOrder, scheduledWorkOrders, selectedDate, daysRequired);
           console.log(`  ⏰ Available slot: ${availableSlot ? availableSlot.toISOString() : 'None'}`);
           
           if (availableSlot && lineScore > bestScore) {
@@ -362,10 +369,43 @@ const Schedule: React.FC = () => {
         }
 
         if (bestLine && bestStartTime) {
-          // Calculate end time with line-specific adjustments
+          // Calculate end time for multi-day scheduling
           const adjustedDuration = totalDurationHours * (bestLine.time_multiplier || 1.0);
+          const dailyCapacity = (bestLine.shifts_per_day || 1) * (bestLine.hours_per_shift || 8);
+          const daysRequired = Math.ceil(adjustedDuration / dailyCapacity);
+          
+          // Calculate actual end time considering daily work hours
           const endTime = new Date(bestStartTime);
-          endTime.setHours(endTime.getHours() + adjustedDuration);
+          const workingHoursPerDay = bestLine.hours_per_shift || 8;
+          
+          if (daysRequired === 1) {
+            // Single day: just add the duration
+            endTime.setHours(endTime.getHours() + adjustedDuration);
+          } else {
+            // Multi-day: calculate based on working days and daily capacity
+            let remainingHours = adjustedDuration;
+            let currentDay = new Date(bestStartTime);
+            
+            while (remainingHours > 0) {
+              const hoursThisDay = Math.min(remainingHours, workingHoursPerDay);
+              remainingHours -= hoursThisDay;
+              
+              if (remainingHours > 0) {
+                // Move to next working day
+                currentDay.setDate(currentDay.getDate() + 1);
+                // Skip weekends if line doesn't work weekends
+                while ((bestLine.days_per_week || 5) === 5 && (currentDay.getDay() === 0 || currentDay.getDay() === 6)) {
+                  currentDay.setDate(currentDay.getDate() + 1);
+                }
+              } else {
+                // Last day - calculate exact end time
+                const [startHour] = (bestLine.start_time || '08:00').split(':').map(Number);
+                currentDay.setHours(startHour + hoursThisDay);
+              }
+            }
+            
+            endTime.setTime(currentDay.getTime());
+          }
 
           console.log(`📅 Scheduling work order ${workOrder.work_order_number} on ${bestLine.line_name}`);
           console.log(`⏰ Start: ${bestStartTime.toISOString()}, End: ${endTime.toISOString()}`);
@@ -406,6 +446,91 @@ const Schedule: React.FC = () => {
       setAutoScheduleRunning(false);
     }
   }, [workOrders, productionLines, selectedDate, user, updateWorkOrderSchedule, fetchWorkOrders]);
+
+  // Helper function to find earliest available multi-day time slot
+  const findEarliestMultiDaySlot = (
+    line: ProductionLine, 
+    workOrder: WorkOrder, 
+    scheduledWorkOrders: WorkOrder[], 
+    targetDate: string,
+    daysRequired: number
+  ): Date | null => {
+    // Parse line work hours
+    const startTimeStr = line.start_time || '08:00';
+    const endTimeStr = line.end_time || '17:00';
+    const [startHour, startMinute] = startTimeStr.split(':').map(Number);
+    const [endHour, endMinute] = endTimeStr.split(':').map(Number);
+
+    // Calculate daily capacity and work order duration
+    const dailyCapacity = (line.shifts_per_day || 1) * (line.hours_per_shift || 8);
+    const setupHours = workOrder.setup_hours_estimated || 0;
+    const productionHours = workOrder.production_time_hours_estimated || 0;
+    const productionDays = workOrder.production_time_days_estimated || 0;
+    const totalDurationHours = setupHours + productionHours + (productionDays * 8);
+
+    // Start checking from the target date
+    let checkDate = new Date(targetDate);
+    const maxLookAhead = 30; // Don't look more than 30 days ahead
+    
+    for (let dayOffset = 0; dayOffset < maxLookAhead; dayOffset++) {
+      const currentCheckDate = new Date(checkDate);
+      currentCheckDate.setDate(checkDate.getDate() + dayOffset);
+      
+      // Skip weekends if line doesn't work weekends
+      const dayOfWeek = currentCheckDate.getDay();
+      if ((line.days_per_week || 5) === 5 && (dayOfWeek === 0 || dayOfWeek === 6)) {
+        continue;
+      }
+
+      // Check if we have consecutive available days starting from this date
+      let consecutiveDaysAvailable = true;
+      
+      for (let dayIndex = 0; dayIndex < daysRequired; dayIndex++) {
+        const checkingDate = new Date(currentCheckDate);
+        checkingDate.setDate(currentCheckDate.getDate() + dayIndex);
+        
+        // Skip weekends for additional days too
+        const checkingDayOfWeek = checkingDate.getDay();
+        if ((line.days_per_week || 5) === 5 && (checkingDayOfWeek === 0 || checkingDayOfWeek === 6)) {
+          consecutiveDaysAvailable = false;
+          break;
+        }
+
+        // Get existing schedules for this line on this specific date
+        const daySchedules = scheduledWorkOrders.filter(wo => 
+          wo.line_id === line.id && 
+          wo.scheduled_start_time &&
+          wo.scheduled_end_time &&
+          new Date(wo.scheduled_start_time).toDateString() === checkingDate.toDateString()
+        );
+
+        // Calculate how much capacity is used this day
+        const usedCapacity = daySchedules.reduce((total, wo) => {
+          const start = new Date(wo.scheduled_start_time!);
+          const end = new Date(wo.scheduled_end_time!);
+          const duration = (end.getTime() - start.getTime()) / (1000 * 60 * 60); // Convert to hours
+          return total + duration;
+        }, 0);
+
+        // Check if we have enough remaining capacity for this day's portion
+        const dailyHoursNeeded = Math.min(totalDurationHours - (dayIndex * dailyCapacity), dailyCapacity);
+        
+        if (usedCapacity + dailyHoursNeeded > dailyCapacity) {
+          consecutiveDaysAvailable = false;
+          break;
+        }
+      }
+
+      if (consecutiveDaysAvailable) {
+        // Found a valid starting date - return the start time
+        const startTime = new Date(currentCheckDate);
+        startTime.setHours(startHour, startMinute, 0, 0);
+        return startTime;
+      }
+    }
+
+    return null;
+  };
 
   // Helper function to find earliest available time slot
   const findEarliestAvailableSlot = (
