@@ -2568,6 +2568,67 @@ def debug_production_lines_check():
             'timestamp': datetime.now().isoformat()
         }), 500
 
+@app.route('/api/debug/fix-production-line-capacity', methods=['POST'])
+@require_auth(['admin'])
+def fix_production_line_capacity():
+    """Debug endpoint to fix production line capacities for auto-scheduling"""
+    try:
+        conn = get_database_connection()
+        cursor = conn.cursor()
+        
+        # Update production line capacities to realistic values
+        # Formula: (shifts_per_day * hours_per_shift * days_per_week) - break_time
+        updates = []
+        
+        cursor.execute("""
+            UPDATE production_lines 
+            SET available_capacity = (
+                shifts_per_day * hours_per_shift * days_per_week
+            ) - (
+                COALESCE(lunch_break_duration, 60) + COALESCE(break_duration, 15)
+            ) * shifts_per_day * days_per_week / 60.0
+            WHERE available_capacity < 10
+        """)
+        
+        updated_rows = cursor.rowcount
+        
+        # Get updated values
+        cursor.execute("""
+            SELECT line_name, available_capacity, shifts_per_day, hours_per_shift, days_per_week
+            FROM production_lines 
+            ORDER BY line_name
+        """)
+        
+        lines = []
+        for row in cursor.fetchall():
+            lines.append({
+                'line_name': row[0],
+                'available_capacity': row[1],
+                'shifts_per_day': row[2],
+                'hours_per_shift': row[3],
+                'days_per_week': row[4],
+                'calculated_daily': row[2] * row[3] if row[2] and row[3] else 0
+            })
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        return jsonify({
+            'message': 'Production line capacities updated',
+            'updated_rows': updated_rows,
+            'lines': lines,
+            'timestamp': datetime.now().isoformat()
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Debug capacity fix error: {e}")
+        return jsonify({
+            'error': 'Capacity fix failed',
+            'details': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
 @app.route('/api/work-orders/<work_order_id>/clear-to-build', methods=['PUT', 'OPTIONS'])
 @require_auth(['admin', 'scheduler', 'supervisor'])
 def update_clear_to_build(work_order_id):
