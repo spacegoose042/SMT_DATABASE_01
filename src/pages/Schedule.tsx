@@ -1164,7 +1164,7 @@ const Schedule: React.FC = () => {
                           {orders.map(wo => {
                             const startTime = new Date(wo.scheduled_start_time!);
                             const endTime = wo.scheduled_end_time ? new Date(wo.scheduled_end_time) : null;
-                            const duration = (wo.setup_hours_estimated || 0) + (wo.production_time_hours_estimated || 0) + ((wo.production_time_days_estimated || 0) * 8);
+                            const duration = wo.setup_hours_estimated + wo.production_time_hours_estimated + (wo.production_time_days_estimated * 8);
                             
                             return (
                               <div key={wo.id} className="flex items-center justify-between p-3 bg-sy-black-50 rounded border border-gray-200">
