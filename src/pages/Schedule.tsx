@@ -371,9 +371,16 @@ const Schedule: React.FC = () => {
           console.log(`  Daily capacity: ${dailyCapacity} hours/day`);
           console.log(`  Required duration: ${totalDurationHours} hours total`);
           
-          // Calculate how many days this work order will need
-          const daysRequired = Math.ceil(totalDurationHours / dailyCapacity);
-          console.log(`  Days required: ${daysRequired} days`);
+                  // Calculate how many days this work order will need
+        const daysRequired = Math.ceil(totalDurationHours / dailyCapacity);
+        console.log(`  Days required: ${daysRequired} days`);
+        
+        // Special logging for long work orders
+        if (totalDurationHours > 50) {
+          console.log(`🚨 LONG WORK ORDER: ${workOrder.work_order_number} needs ${totalDurationHours}h (${daysRequired} days)`);
+          console.log(`  Line: ${line.line_name} (${dailyCapacity}h/day)`);
+          console.log(`  Due date: ${workOrder.ship_date}`);
+        }
           
           // Check if work order can fit within daily capacity (even if it spans multiple days)
           if (dailyCapacity === 0) {
@@ -563,7 +570,15 @@ const Schedule: React.FC = () => {
 
     // Start checking from the target date
     let checkDate = new Date(targetDate);
-    const maxLookAhead = 45; // Don't look more than 45 days ahead
+    // Extended look-ahead for very long work orders that need more time
+    const adjustedDuration = (workOrder.setup_hours_estimated || 0) + 
+                            (workOrder.production_time_hours_estimated || 0) + 
+                            ((workOrder.production_time_days_estimated || 0) * 8);
+    const dailyCapacity = (line.shifts_per_day || 1) * (line.hours_per_shift || 8);
+    const estimatedDays = Math.ceil(adjustedDuration / Math.max(dailyCapacity, 1));
+    
+    // Use longer look-ahead for work orders that need more than 30 days
+    const maxLookAhead = estimatedDays > 30 ? Math.min(90, estimatedDays + 30) : 45;
     
     for (let dayOffset = 0; dayOffset < maxLookAhead; dayOffset++) {
       const currentCheckDate = new Date(checkDate);
@@ -1085,6 +1100,120 @@ const Schedule: React.FC = () => {
                 </div>
               ))}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Calendar View */}
+      {viewMode === 'calendar' && (
+        <div className="bg-white shadow rounded-lg">
+          <div className="px-6 py-4 border-b border-gray-200">
+            <h3 className="text-lg font-medium text-sy-black-900">Calendar View</h3>
+            <p className="mt-1 text-sm text-sy-black-600">
+              Scheduled work orders by date ({filteredWorkOrders.filter(wo => wo.scheduled_start_time).length} scheduled)
+            </p>
+          </div>
+          
+          <div className="p-6">
+            {(() => {
+              // Group scheduled work orders by date
+              const workOrdersByDate = filteredWorkOrders
+                .filter(wo => wo.scheduled_start_time)
+                .reduce((acc, wo) => {
+                  const startDate = new Date(wo.scheduled_start_time!).toISOString().split('T')[0];
+                  if (!acc[startDate]) acc[startDate] = [];
+                  acc[startDate].push(wo);
+                  return acc;
+                }, {} as Record<string, typeof filteredWorkOrders>);
+
+              // Sort dates
+              const sortedDates = Object.keys(workOrdersByDate).sort();
+
+              if (sortedDates.length === 0) {
+                return (
+                  <div className="text-center py-12">
+                    <CalendarIcon className="mx-auto h-12 w-12 text-gray-400" />
+                    <h3 className="mt-2 text-sm font-medium text-sy-black-900">No scheduled work orders</h3>
+                    <p className="mt-1 text-sm text-sy-black-500">
+                      Run auto-scheduling to see work orders on the calendar.
+                    </p>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="space-y-6">
+                  {sortedDates.map(date => {
+                    const orders = workOrdersByDate[date];
+                    const dateObj = new Date(date + 'T00:00:00');
+                    const dayName = dateObj.toLocaleDateString('en-US', { weekday: 'long' });
+                    const monthDay = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                    
+                    return (
+                      <div key={date} className="border border-gray-200 rounded-lg">
+                        <div className="bg-gray-50 px-4 py-3 border-b border-gray-200">
+                          <h4 className="text-lg font-medium text-sy-black-900">
+                            {dayName}, {monthDay}
+                            <span className="ml-2 text-sm font-normal text-sy-black-500">
+                              ({orders.length} work order{orders.length !== 1 ? 's' : ''})
+                            </span>
+                          </h4>
+                        </div>
+                        
+                        <div className="p-4 space-y-3">
+                          {orders.map(wo => {
+                            const startTime = new Date(wo.scheduled_start_time!);
+                            const endTime = wo.scheduled_end_time ? new Date(wo.scheduled_end_time) : null;
+                            const duration = wo.setup_hours_estimated + wo.production_time_hours_estimated + (wo.production_time_days_estimated * 8);
+                            
+                            return (
+                              <div key={wo.id} className="flex items-center justify-between p-3 bg-sy-black-50 rounded border border-gray-200">
+                                <div className="flex-1">
+                                  <div className="flex items-center space-x-4">
+                                    <div className="font-medium text-sy-black-900">
+                                      {wo.work_order_number}
+                                    </div>
+                                    <div className="text-sm text-sy-black-600">
+                                      {wo.customer_name}
+                                    </div>
+                                    <div className="text-sm text-sy-black-500">
+                                      {wo.assembly_number} (Qty: {wo.quantity})
+                                    </div>
+                                  </div>
+                                  <div className="mt-1 text-xs text-sy-black-500">
+                                    {startTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                                    {endTime && ` - ${endTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`}
+                                    • {duration.toFixed(1)}h duration
+                                    • {wo.line_name}
+                                  </div>
+                                </div>
+                                
+                                <div className="text-right">
+                                  <div className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                    wo.status === 'Ready' || wo.status === 'Ready*' 
+                                      ? 'bg-green-100 text-green-800'
+                                      : wo.status === '1st Side Ready'
+                                      ? 'bg-blue-100 text-blue-800'
+                                      : 'bg-gray-100 text-gray-800'
+                                  }`}>
+                                    {wo.status}
+                                  </div>
+                                  {wo.ship_date && (
+                                    <div className="mt-1 text-xs text-sy-black-500">
+                                      Ship: {new Date(wo.ship_date).toLocaleDateString()}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}
