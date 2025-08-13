@@ -2640,6 +2640,73 @@ def fix_production_line_capacity():
             'timestamp': datetime.now().isoformat()
         }), 500
 
+@app.route('/api/debug/scheduled-work-orders-check', methods=['GET'])
+def debug_scheduled_work_orders_check():
+    """Debug endpoint to check scheduled work orders in database"""
+    try:
+        connection = get_db_connection()
+        cursor = connection.cursor()
+        
+        # Check total work orders
+        cursor.execute("SELECT COUNT(*) FROM work_orders")
+        total_count = cursor.fetchone()[0]
+        
+        # Check work orders with scheduled times
+        cursor.execute("""
+            SELECT COUNT(*) FROM work_orders 
+            WHERE scheduled_start_time IS NOT NULL
+        """)
+        scheduled_count = cursor.fetchone()[0]
+        
+        # Get sample of scheduled work orders
+        cursor.execute("""
+            SELECT work_order_number, scheduled_start_time, scheduled_end_time, line_id
+            FROM work_orders 
+            WHERE scheduled_start_time IS NOT NULL
+            LIMIT 5
+        """)
+        scheduled_samples = cursor.fetchall()
+        
+        # Get sample of unscheduled work orders
+        cursor.execute("""
+            SELECT work_order_number, status
+            FROM work_orders 
+            WHERE scheduled_start_time IS NULL
+            LIMIT 5
+        """)
+        unscheduled_samples = cursor.fetchall()
+        
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'total_work_orders': total_count,
+            'scheduled_work_orders': scheduled_count,
+            'scheduled_samples': [
+                {
+                    'work_order_number': row[0],
+                    'scheduled_start_time': row[1].isoformat() if row[1] else None,
+                    'scheduled_end_time': row[2].isoformat() if row[2] else None,
+                    'line_id': row[3]
+                } for row in scheduled_samples
+            ],
+            'unscheduled_samples': [
+                {
+                    'work_order_number': row[0],
+                    'status': row[1]
+                } for row in unscheduled_samples
+            ],
+            'timestamp': datetime.now().isoformat()
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Debug scheduled check error: {e}")
+        return jsonify({
+            'error': 'Debug scheduled check failed',
+            'details': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
 @app.route('/api/work-orders/<work_order_id>/clear-to-build', methods=['PUT', 'OPTIONS'])
 @require_auth(['admin', 'scheduler', 'supervisor'])
 def update_clear_to_build(work_order_id):
