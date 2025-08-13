@@ -438,6 +438,7 @@ const Schedule: React.FC = () => {
 
           console.log(`📅 Scheduling work order ${workOrder.work_order_number} on ${bestLine.line_name}`);
           console.log(`⏰ Start: ${bestStartTime.toISOString()}, End: ${endTime.toISOString()}`);
+          console.log(`🆔 Work Order ID being sent to API: "${workOrder.id}" (type: ${typeof workOrder.id})`);
 
           // Update work order with schedule
           try {
