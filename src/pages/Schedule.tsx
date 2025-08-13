@@ -660,20 +660,43 @@ const Schedule: React.FC = () => {
           break;
         }
 
-        // Get existing schedules for this line on this specific date
-        const daySchedules = scheduledWorkOrders.filter(wo => 
-          wo.line_id === line.id && 
-          wo.scheduled_start_time &&
-          wo.scheduled_end_time &&
-          new Date(wo.scheduled_start_time).toDateString() === checkingDate.toDateString()
-        );
+        // Get existing schedules for this line that overlap with this specific date
+        const daySchedules = scheduledWorkOrders.filter(wo => {
+          if (wo.line_id !== line.id || !wo.scheduled_start_time || !wo.scheduled_end_time) {
+            return false;
+          }
+          
+          const woStart = new Date(wo.scheduled_start_time);
+          const woEnd = new Date(wo.scheduled_end_time);
+          
+          // Check if the work order overlaps with the checking date
+          const dayStart = new Date(checkingDate);
+          dayStart.setHours(0, 0, 0, 0);
+          const dayEnd = new Date(checkingDate);
+          dayEnd.setHours(23, 59, 59, 999);
+          
+          // Work order overlaps if it starts before day ends AND ends after day starts
+          return woStart <= dayEnd && woEnd >= dayStart;
+        });
 
-        // Calculate how much capacity is used this day
+        // Calculate how much capacity is used this day (only count the portion that overlaps with this day)
         const usedCapacity = daySchedules.reduce((total, wo) => {
-          const start = new Date(wo.scheduled_start_time!);
-          const end = new Date(wo.scheduled_end_time!);
-          const duration = (end.getTime() - start.getTime()) / (1000 * 60 * 60); // Convert to hours
-          return total + duration;
+          const woStart = new Date(wo.scheduled_start_time!);
+          const woEnd = new Date(wo.scheduled_end_time!);
+          
+          // Calculate the overlap between work order and this day
+          const dayStart = new Date(checkingDate);
+          dayStart.setHours(startHour, startMinute, 0, 0);
+          const dayEnd = new Date(checkingDate);
+          dayEnd.setHours(endHour, endMinute, 0, 0);
+          
+          // Find the actual overlap period
+          const overlapStart = new Date(Math.max(woStart.getTime(), dayStart.getTime()));
+          const overlapEnd = new Date(Math.min(woEnd.getTime(), dayEnd.getTime()));
+          
+          // Calculate duration of overlap in hours
+          const overlapDuration = Math.max(0, (overlapEnd.getTime() - overlapStart.getTime()) / (1000 * 60 * 60));
+          return total + overlapDuration;
         }, 0);
 
         // Check if we have enough remaining capacity for this day's portion
@@ -1220,7 +1243,7 @@ const Schedule: React.FC = () => {
                           {orders.map(wo => {
                             const startTime = new Date(wo.scheduled_start_time!);
                             const endTime = wo.scheduled_end_time ? new Date(wo.scheduled_end_time) : null;
-                            const duration = wo.setup_hours_estimated + wo.production_time_hours_estimated + (wo.production_time_days_estimated * 8);
+                            const duration = (wo.setup_hours_estimated || 0) + (wo.production_time_hours_estimated || 0) + ((wo.production_time_days_estimated || 0) * 8);
                             
                             return (
                               <div key={wo.id} className="flex items-center justify-between p-3 bg-sy-black-50 rounded border border-gray-200">
