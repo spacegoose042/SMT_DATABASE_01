@@ -400,11 +400,22 @@ const Schedule: React.FC = () => {
           const availableSlot = findBestMultiDaySlot(line, workOrder, scheduledWorkOrders, selectedDate, daysRequired);
           console.log(`  ⏰ Available slot: ${availableSlot ? availableSlot.toISOString() : 'None'}`);
           
-          if (availableSlot && lineScore > bestScore) {
-            console.log(`  ✅ New best line!`);
-            bestLine = line;
-            bestScore = lineScore;
-            bestStartTime = availableSlot;
+          if (availableSlot) {
+            // Calculate completion time score (earlier start = higher score)
+            const now = new Date();
+            const daysFromNow = Math.ceil((availableSlot.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+            const timeScore = Math.max(0, 100 - daysFromNow); // 100 points for immediate start, decreases by 1 per day
+            
+            // Combined score: line quality + timing
+            const totalScore = lineScore + timeScore;
+            console.log(`  ⏰ Days from now: ${daysFromNow}, Time score: ${timeScore}, Total score: ${totalScore}`);
+            
+            if (totalScore > bestScore) {
+              console.log(`  ✅ New best line! (was ${bestScore}, now ${totalScore})`);
+              bestLine = line;
+              bestScore = totalScore;
+              bestStartTime = availableSlot;
+            }
           }
         }
 
