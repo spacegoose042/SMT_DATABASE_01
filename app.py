@@ -957,6 +957,8 @@ def get_schedule_timeline():
                 wo.created_at,
                 wo.updated_at,
                 wo.line_number,
+                wo.scheduled_start_time,
+                wo.scheduled_end_time,
                 pl.line_name,
                 pl.line_type,
                 pl.status as line_status,
@@ -999,12 +1001,14 @@ def get_schedule_timeline():
                 'created_at': row[20].isoformat() if row[20] else None,
                 'updated_at': row[21].isoformat() if row[21] else None,
                 'line_number': line_number,
+                'scheduled_start_time': row[23].isoformat() if row[23] else None,
+                'scheduled_end_time': row[24].isoformat() if row[24] else None,
                 'qr_code': qr_code,
-                'line_name': row[23],
-                'line_type': row[24],
-                'line_status': row[25],
-                'current_utilization': float(row[26]) if row[26] else 0.0,
-                'available_capacity': row[27],
+                'line_name': row[25],
+                'line_type': row[26],
+                'line_status': row[27],
+                'current_utilization': float(row[28]) if row[28] else 0.0,
+                'available_capacity': row[29],
                 'clear_to_build': True  # Default value since column doesn't exist
             }
             work_orders.append(work_order)
