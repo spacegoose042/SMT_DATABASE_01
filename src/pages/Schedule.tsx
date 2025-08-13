@@ -208,18 +208,59 @@ const Schedule: React.FC = () => {
       return;
     }
 
-    console.log('🚀 Starting auto-schedule...');
-    console.log('👤 User role:', user.role);
-    console.log('🌐 Base URL:', baseUrl);
-    console.log('🔑 Auth token exists:', !!localStorage.getItem('auth_token'));
-
     setAutoScheduleRunning(true);
     try {
-      // Get available work orders (not completed, cancelled, or already scheduled)
+      console.log('🚀 Starting auto-schedule...');
+      console.log('👤 User role:', user.role);
+      console.log('🌐 Base URL:', baseUrl);
+      console.log('🔑 Auth token exists:', !!localStorage.getItem('auth_token'));
+      // Get locked work orders (first 2 on each line) that should not be moved
+      const lockedWorkOrders = new Set();
+      
+      // Group scheduled work orders by line and find first 2 on each line
+      const workOrdersByLine = workOrders
+        .filter(wo => wo.scheduled_start_time && wo.line_name)
+        .sort((a, b) => new Date(a.scheduled_start_time!).getTime() - new Date(b.scheduled_start_time!).getTime())
+        .reduce((acc, wo) => {
+          if (!acc[wo.line_name!]) acc[wo.line_name!] = [];
+          acc[wo.line_name!].push(wo);
+          return acc;
+        }, {} as Record<string, typeof workOrders>);
+      
+      // Mark first 2 work orders on each line as locked
+      Object.values(workOrdersByLine).forEach(lineWorkOrders => {
+        lineWorkOrders.slice(0, 2).forEach(wo => {
+          lockedWorkOrders.add(wo.id);
+        });
+      });
+      
+      console.log(`🔒 Locked ${lockedWorkOrders.size} work orders (first 2 on each line)`);
+      
+      // Clear schedules for unlocked work orders (keep first 2 on each line)
+      const unlockedScheduledWorkOrders = workOrders.filter(wo => 
+        wo.scheduled_start_time && !lockedWorkOrders.has(wo.id)
+      );
+      
+      console.log(`🔄 Clearing ${unlockedScheduledWorkOrders.length} unlocked scheduled work orders for re-optimization`);
+      
+      // Clear schedules for unlocked work orders
+      for (const workOrder of unlockedScheduledWorkOrders) {
+        try {
+          await updateWorkOrderSchedule(workOrder.id, {
+            scheduled_start_time: null,
+            scheduled_end_time: null,
+            line_id: null
+          });
+        } catch (error) {
+          console.error(`Failed to clear schedule for ${workOrder.work_order_number}:`, error);
+        }
+      }
+      
+      // Get available work orders (not completed, cancelled, or locked)
       const availableWorkOrders = workOrders.filter(wo => 
         wo.status !== 'Completed' && 
         wo.status !== 'Cancelled' && 
-        !wo.scheduled_start_time
+        (!wo.scheduled_start_time || !lockedWorkOrders.has(wo.id)) // Include unlocked scheduled orders
         // Note: clear_to_build filtering removed for now since column doesn't exist in DB
       );
 
