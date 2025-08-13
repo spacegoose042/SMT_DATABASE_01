@@ -2644,7 +2644,7 @@ def fix_production_line_capacity():
 def debug_scheduled_work_orders_check():
     """Debug endpoint to check scheduled work orders in database"""
     try:
-        connection = get_db_connection()
+        connection = get_database_connection()
         cursor = connection.cursor()
         
         # Check total work orders
