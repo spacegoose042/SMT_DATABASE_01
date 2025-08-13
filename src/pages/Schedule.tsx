@@ -326,9 +326,12 @@ const Schedule: React.FC = () => {
         const productionDays = workOrder.production_time_days_estimated || 0;
         const totalDurationHours = setupHours + productionHours + (productionDays * 8);
         
-        // Capacity utilization (prefer lines with more available capacity)
-        const utilizationRatio = line.available_capacity / (line.hours_per_shift * line.shifts_per_day * line.days_per_week);
-        score += (1 - utilizationRatio) * 20; // Higher score for less utilized lines
+        // Daily capacity preference (prefer lines with higher daily capacity)
+        const dailyCapacity = (line.shifts_per_day || 1) * (line.hours_per_shift || 8);
+        score += dailyCapacity * 2; // Directly reward higher daily capacity
+        
+        // Available capacity bonus (remaining capacity for more work)
+        score += (line.available_capacity || 0) * 3;
         
         // Efficiency score (prefer more efficient lines)
         score += (line.efficiency_target || 85) / 10;
@@ -388,9 +391,10 @@ const Schedule: React.FC = () => {
             continue;
           }
 
-          // Calculate line score
-          const lineScore = calculateLineScore(line, workOrder);
-          console.log(`  📊 Line score: ${lineScore}`);
+                  // Calculate line score
+        const lineScore = calculateLineScore(line, workOrder);
+        console.log(`  📊 Line score: ${lineScore}`);
+        console.log(`  📋 Line details: capacity=${line.available_capacity}, shifts=${line.shifts_per_day}, hours=${line.hours_per_shift}, multiplier=${line.time_multiplier}`);
           
           // Find best available multi-day slot on this line (considering due dates)
           const availableSlot = findBestMultiDaySlot(line, workOrder, scheduledWorkOrders, selectedDate, daysRequired);
