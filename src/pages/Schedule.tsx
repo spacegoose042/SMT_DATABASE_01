@@ -394,6 +394,17 @@ const Schedule: React.FC = () => {
       // Track scheduled work orders for conflict detection
       const scheduledWorkOrders = workOrders.filter(wo => wo.scheduled_start_time);
       
+      // Log current line utilization for load balancing visibility
+      console.log('📊 Current line utilization:');
+      productionLines.forEach(line => {
+        const lineSchedules = scheduledWorkOrders.filter(wo => wo.line_id === line.id && wo.scheduled_end_time);
+        const latestEnd = lineSchedules.length > 0 
+          ? new Date(Math.max(...lineSchedules.map(wo => new Date(wo.scheduled_end_time!).getTime())))
+          : new Date();
+        const daysOut = Math.ceil((latestEnd.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
+        console.log(`  ${line.line_name}: scheduled to ${latestEnd.toLocaleDateString()} (${daysOut} days out)`);
+      });
+      
       // Schedule work orders
       for (const workOrder of prioritizedWorkOrders) {
         // Calculate work order duration
@@ -447,12 +458,31 @@ const Schedule: React.FC = () => {
             const daysFromNow = Math.ceil((availableSlot.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
             const timeScore = Math.max(0, 100 - daysFromNow); // 100 points for immediate start, decreases by 1 per day
             
-            // Combined score: line quality + timing
-            const totalScore = lineScore + timeScore;
-            console.log(`  ⏰ Days from now: ${daysFromNow}, Time score: ${timeScore}, Total score: ${totalScore}`);
+            // Calculate load balancing score - reward less busy lines for maximum throughput
+            const workOrderEndTime = new Date(availableSlot);
+            workOrderEndTime.setTime(workOrderEndTime.getTime() + (totalDurationHours * (line.time_multiplier || 1.0) * 60 * 60 * 1000));
+            
+            // Find the latest end time across all lines to normalize load balancing
+            const allLineEndTimes = productionLines.map(pl => {
+              const lineSchedules = scheduledWorkOrders.filter(wo => wo.line_id === pl.id && wo.scheduled_end_time);
+              if (lineSchedules.length === 0) return now.getTime();
+              return Math.max(...lineSchedules.map(wo => new Date(wo.scheduled_end_time!).getTime()));
+            });
+            const maxLineEndTime = Math.max(...allLineEndTimes);
+            
+            // Load balance score: reward lines that will finish earlier (less backed up)
+            const lineCurrentEndTime = scheduledWorkOrders
+              .filter(wo => wo.line_id === line.id && wo.scheduled_end_time)
+              .reduce((latest, wo) => Math.max(latest, new Date(wo.scheduled_end_time!).getTime()), now.getTime());
+            
+            const loadBalanceScore = Math.max(0, (maxLineEndTime - lineCurrentEndTime) / (1000 * 60 * 60 * 24) * 15); // 15 points per day difference
+            
+            // Combined score: line quality + timing + load balancing
+            const totalScore = lineScore + timeScore + loadBalanceScore;
+            console.log(`  ⏰ Days from now: ${daysFromNow}, Time score: ${timeScore}, Load balance: ${loadBalanceScore.toFixed(1)}, Total score: ${totalScore.toFixed(1)}`);
             
             if (totalScore > bestScore) {
-              console.log(`  ✅ New best line! (was ${bestScore}, now ${totalScore})`);
+              console.log(`  ✅ New best line! (was ${bestScore}, now ${totalScore.toFixed(1)})`);
               bestLine = line;
               bestScore = totalScore;
               bestStartTime = availableSlot;
