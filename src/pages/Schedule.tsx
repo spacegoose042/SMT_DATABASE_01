@@ -394,19 +394,36 @@ const Schedule: React.FC = () => {
       // Track scheduled work orders for conflict detection
       const scheduledWorkOrders = workOrders.filter(wo => wo.scheduled_start_time);
       
-      // Log current line utilization for load balancing visibility
+      // Calculate line end times once for load balancing (only during auto-scheduling)
+      const lineEndTimes = new Map<string, number>();
+      let maxEndTime = new Date().getTime();
+      
       console.log('📊 Current line utilization:');
       productionLines.forEach(line => {
         const lineSchedules = scheduledWorkOrders.filter(wo => wo.line_id === line.id && wo.scheduled_end_time);
         const latestEnd = lineSchedules.length > 0 
-          ? new Date(Math.max(...lineSchedules.map(wo => new Date(wo.scheduled_end_time!).getTime())))
-          : new Date();
-        const daysOut = Math.ceil((latestEnd.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
-        console.log(`  ${line.line_name}: scheduled to ${latestEnd.toLocaleDateString()} (${daysOut} days out)`);
+          ? Math.max(...lineSchedules.map(wo => new Date(wo.scheduled_end_time!).getTime()))
+          : new Date().getTime();
+        
+        lineEndTimes.set(line.id, latestEnd);
+        maxEndTime = Math.max(maxEndTime, latestEnd);
+        
+        const daysOut = Math.ceil((latestEnd - new Date().getTime()) / (1000 * 60 * 60 * 24));
+        console.log(`  ${line.line_name}: scheduled to ${new Date(latestEnd).toLocaleDateString()} (${daysOut} days out)`);
       });
       
-      // Schedule work orders
-      for (const workOrder of prioritizedWorkOrders) {
+      // Schedule work orders with timeout safety
+      const startTime = Date.now();
+      const maxSchedulingTime = 30000; // 30 second timeout for Railway safety
+      
+      for (let i = 0; i < prioritizedWorkOrders.length; i++) {
+        // Safety check for Railway timeout
+        if (Date.now() - startTime > maxSchedulingTime) {
+          console.warn(`⚠️ Scheduling timeout reached, processed ${i}/${prioritizedWorkOrders.length} work orders`);
+          break;
+        }
+        
+        const workOrder = prioritizedWorkOrders[i];
         // Calculate work order duration
         const setupHours = workOrder.setup_hours_estimated || 0;
         const productionHours = workOrder.production_time_hours_estimated || 0;
@@ -458,26 +475,9 @@ const Schedule: React.FC = () => {
             const daysFromNow = Math.ceil((availableSlot.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
             const timeScore = Math.max(0, 100 - daysFromNow); // 100 points for immediate start, decreases by 1 per day
             
-            // Calculate load balancing score - reward less busy lines for maximum throughput
-            const workOrderEndTime = new Date(availableSlot);
-            workOrderEndTime.setTime(workOrderEndTime.getTime() + (totalDurationHours * (line.time_multiplier || 1.0) * 60 * 60 * 1000));
-            
-            // Simplified load balancing - just find max end time more efficiently
-            let maxLineEndTime = now.getTime();
-            for (const pl of productionLines) {
-              const lineSchedules = scheduledWorkOrders.filter(wo => wo.line_id === pl.id && wo.scheduled_end_time);
-              if (lineSchedules.length > 0) {
-                const lineMaxEnd = Math.max(...lineSchedules.map(wo => new Date(wo.scheduled_end_time!).getTime()));
-                maxLineEndTime = Math.max(maxLineEndTime, lineMaxEnd);
-              }
-            }
-            
-            // Load balance score: reward lines that will finish earlier (less backed up)
-            const lineCurrentEndTime = scheduledWorkOrders
-              .filter(wo => wo.line_id === line.id && wo.scheduled_end_time)
-              .reduce((latest, wo) => Math.max(latest, new Date(wo.scheduled_end_time!).getTime()), now.getTime());
-            
-            const loadBalanceScore = Math.max(0, (maxLineEndTime - lineCurrentEndTime) / (1000 * 60 * 60 * 24) * 5); // Reduced to 5 points per day difference for Railway performance
+            // Calculate load balancing score using pre-calculated values (efficient!)
+            const thisLineEndTime = lineEndTimes.get(line.id) || now.getTime();
+            const loadBalanceScore = Math.max(0, (maxEndTime - thisLineEndTime) / (1000 * 60 * 60 * 24) * 15); // 15 points per day difference
             
             // Combined score: line quality + timing + load balancing
             const totalScore = lineScore + timeScore + loadBalanceScore;

@@ -3261,3 +3261,181 @@ if __name__ == '__main__':
     # Use Socket.IO runner for real-time features alongside SSE
     logger.info("Starting SMT Production Database v2.5-Hybrid with SSE + Socket.IO")
     socketio.run(app, host='0.0.0.0', port=port, debug=debug, allow_unsafe_werkzeug=True) 
+
+    socketio.run(app, host='0.0.0.0', port=port, debug=debug, allow_unsafe_werkzeug=True) 
+                'work_order_number': 'WO-2024-001',
+                'quantity': 100,
+                'status': 'Ready',
+                'clear_to_build': True,
+                'kit_date': (datetime.now() + timedelta(days=2)).strftime('%Y-%m-%d'),
+                'ship_date': (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d'),
+                'setup_hours_estimated': 2,
+                'production_time_hours_estimated': 4,
+                'production_time_days_estimated': 0,
+                'assembly_number': 'ASSY-001',
+                'revision': 'A',
+                'description': 'Test Assembly 1',
+                'customer_id': customer_id
+            },
+            {
+                'work_order_number': 'WO-2024-002',
+                'quantity': 250,
+                'status': 'Pending',
+                'clear_to_build': True,
+                'kit_date': (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d'),
+                'ship_date': (datetime.now() + timedelta(days=5)).strftime('%Y-%m-%d'),
+                'setup_hours_estimated': 3,
+                'production_time_hours_estimated': 6,
+                'production_time_days_estimated': 0,
+                'assembly_number': 'ASSY-002',
+                'revision': 'B',
+                'description': 'Test Assembly 2',
+                'customer_id': customer_id
+            },
+            {
+                'work_order_number': 'WO-2024-003',
+                'quantity': 500,
+                'status': 'Ready',
+                'clear_to_build': True,
+                'kit_date': (datetime.now() + timedelta(days=3)).strftime('%Y-%m-%d'),
+                'ship_date': (datetime.now() + timedelta(days=10)).strftime('%Y-%m-%d'),
+                'setup_hours_estimated': 1,
+                'production_time_hours_estimated': 8,
+                'production_time_days_estimated': 1,
+                'assembly_number': 'ASSY-003',
+                'revision': 'C',
+                'description': 'Test Assembly 3',
+                'customer_id': customer_id
+            },
+            {
+                'work_order_number': 'WO-2024-004',
+                'quantity': 75,
+                'status': 'Ready',
+                'clear_to_build': True,
+                'kit_date': (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d'),
+                'ship_date': (datetime.now() + timedelta(days=3)).strftime('%Y-%m-%d'),
+                'setup_hours_estimated': 1,
+                'production_time_hours_estimated': 2,
+                'production_time_days_estimated': 0,
+                'assembly_number': 'ASSY-004',
+                'revision': 'A',
+                'description': 'Test Assembly 4',
+                'customer_id': customer_id
+            },
+            {
+                'work_order_number': 'WO-2024-005',
+                'quantity': 300,
+                'status': 'Pending',
+                'clear_to_build': True,
+                'kit_date': (datetime.now() + timedelta(days=4)).strftime('%Y-%m-%d'),
+                'ship_date': (datetime.now() + timedelta(days=12)).strftime('%Y-%m-%d'),
+                'setup_hours_estimated': 4,
+                'production_time_hours_estimated': 10,
+                'production_time_days_estimated': 1,
+                'assembly_number': 'ASSY-005',
+                'revision': 'D',
+                'description': 'Test Assembly 5',
+                'customer_id': customer_id
+            }
+        ]
+        
+        created_count = 0
+        for wo in test_work_orders:
+            try:
+                # First, create or get the assembly
+                cursor.execute("""
+                    INSERT INTO assemblies (customer_id, assembly_number, revision, description)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (customer_id, assembly_number, revision) 
+                    DO UPDATE SET description = EXCLUDED.description
+                    RETURNING id
+                """, (wo['customer_id'], wo['assembly_number'], wo['revision'], wo['description']))
+                
+                assembly_id = cursor.fetchone()[0]
+                
+                # Then create the work order
+                cursor.execute("""
+                    INSERT INTO work_orders (
+                        work_order_number, assembly_id, quantity, status, kit_date, ship_date,
+                        setup_hours_estimated, production_time_hours_estimated, production_time_days_estimated
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    wo['work_order_number'], assembly_id, wo['quantity'], wo['status'],
+                    wo['kit_date'], wo['ship_date'], wo['setup_hours_estimated'],
+                    wo['production_time_hours_estimated'], wo['production_time_days_estimated']
+                ))
+                created_count += 1
+            except Exception as e:
+                app.logger.error(f"Error creating work order {wo['work_order_number']}: {e}")
+                continue
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        return jsonify({
+            'message': f'Successfully created {created_count} test work orders',
+            'created_count': created_count
+        }), 201
+        
+    except Exception as e:
+        app.logger.error(f"Error creating test work orders: {str(e)}")
+        return jsonify({'error': f'Failed to create test work orders: {str(e)}'}), 500
+
+@app.route('/api/migrate/add-clear-to-build-column', methods=['POST'])
+@require_auth(['admin'])
+def migrate_add_clear_to_build_column():
+    """Add clear_to_build column to work_orders table"""
+    try:
+        conn = get_database_connection()
+        cursor = conn.cursor()
+        
+        # Add clear_to_build column
+        cursor.execute("ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS clear_to_build BOOLEAN DEFAULT true")
+        
+        # Update existing records to have clear_to_build = true
+        cursor.execute("UPDATE work_orders SET clear_to_build = true WHERE clear_to_build IS NULL")
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        return jsonify({
+            'message': 'Successfully added clear_to_build column to work_orders table'
+        }), 200
+        
+    except Exception as e:
+        app.logger.error(f"Error adding clear_to_build column: {str(e)}")
+        return jsonify({'error': f'Failed to add clear_to_build column: {str(e)}'}), 500
+
+        return jsonify({
+            'sample_row': list(sample_row) if sample_row else None,
+            'table_structure': columns,
+            'total_rows': total_rows
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error testing work_orders: {str(e)}")
+        return jsonify({'error': f'Failed to test work_orders: {str(e)}'}), 500
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 8080))
+    debug = os.environ.get('DEBUG', 'false').lower() == 'true'
+    
+    logger.info(f"Starting SMT Production Schedule Database application v2.4 - Real-time Updates Ready")
+    
+    # Auto-initialize database if enabled
+    auto_init = os.environ.get('AUTO_INIT_DB', 'true').lower() == 'true'
+    if auto_init:
+        logger.info("Auto-initialization enabled, checking database...")
+        success = initialize_database()
+        if success:
+            logger.info("Database initialization completed successfully")
+        else:
+            logger.warning("Database initialization failed or was skipped")
+    else:
+        logger.info("Auto-initialization disabled, skipping database setup")
+    
+    # Use Socket.IO runner for real-time features alongside SSE
+    logger.info("Starting SMT Production Database v2.5-Hybrid with SSE + Socket.IO")
+    socketio.run(app, host='0.0.0.0', port=port, debug=debug, allow_unsafe_werkzeug=True) 
