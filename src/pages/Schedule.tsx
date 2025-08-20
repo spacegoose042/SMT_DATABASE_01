@@ -256,20 +256,31 @@ const Schedule: React.FC = () => {
         }
       }
       
-      // Get available work orders (not completed, cancelled, or locked)
+      // Get available work orders (not completed, cancelled, running, or locked)
       const availableWorkOrders = workOrders.filter(wo => 
         wo.status !== 'Completed' && 
         wo.status !== 'Cancelled' && 
+        wo.status !== 'Running' &&        // 🔒 Running work orders are locked on lines
         (!wo.scheduled_start_time || !lockedWorkOrders.has(wo.id)) // Include unlocked scheduled orders
         // Note: clear_to_build filtering removed for now since column doesn't exist in DB
       );
 
       // Debug logging
-      console.log('Total work orders:', workOrders.length);
-      console.log('Available work orders:', availableWorkOrders.length);
-      console.log('Work order statuses:', [...new Set(workOrders.map(wo => wo.status))]);
-      console.log('Scheduled work orders:', workOrders.filter(wo => wo.scheduled_start_time).length);
-      console.log('Clear to build statuses:', [...new Set(workOrders.map(wo => wo.clear_to_build))]);
+      console.log('📊 WORK ORDER ANALYSIS:');
+      console.log(`  Total work orders: ${workOrders.length}`);
+      console.log(`  Available for scheduling: ${availableWorkOrders.length}`);
+      console.log(`  Running (locked): ${workOrders.filter(wo => wo.status === 'Running').length}`);
+      console.log(`  Already scheduled: ${workOrders.filter(wo => wo.scheduled_start_time).length}`);
+      console.log('  Status breakdown:', [...new Set(workOrders.map(wo => wo.status))]);
+      
+      // Show available work orders with details
+      console.log('\n🎯 AVAILABLE WORK ORDERS:');
+      availableWorkOrders.slice(0, 10).forEach(wo => {
+        console.log(`  ${wo.work_order_number}: ${wo.status} | Customer: ${wo.customer_name || 'Unknown'} | Due: ${wo.ship_date || 'No date'}`);
+      });
+      if (availableWorkOrders.length > 10) {
+        console.log(`  ... and ${availableWorkOrders.length - 10} more work orders`);
+      }
 
       // Get available production lines (exclude Hand Placement and disabled lines)
       const availableLines = productionLines.filter(line => 
@@ -456,6 +467,16 @@ const Schedule: React.FC = () => {
           if (dailyCapacity === 0) {
             console.log(`  ❌ No daily capacity configured`);
             continue;
+          }
+
+          // 🏭 LINE CAPABILITY CONSTRAINTS (based on real production rules)
+          // Line 4 (MCI line) should only run MCI assemblies
+          if (line.line_name && line.line_name.includes('MCI')) {
+            const customerName = workOrder.customer_name || '';
+            if (!customerName.toLowerCase().includes('mci')) {
+              console.log(`  ❌ MCI line restricted to MCI customer only (customer: ${customerName})`);
+              continue;
+            }
           }
 
           // Calculate when this line could complete the work order
